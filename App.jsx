@@ -7,6 +7,7 @@ import {
   LogIn,
   LogOut,
   Users,
+  UserPlus,
   Plus,
   X,
   Swords,
@@ -150,6 +151,9 @@ export default function App() {
   const [addMemberQuery, setAddMemberQuery] = useState({});
   const [addMemberResults, setAddMemberResults] = useState({});
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [friends, setFriends] = useState([]);
+  const [friendQuery, setFriendQuery] = useState("");
+  const [friendResults, setFriendResults] = useState([]);
 
   const [newTourName, setNewTourName] = useState("");
   const [newTourMode, setNewTourMode] = useState("5x5");
@@ -165,6 +169,7 @@ export default function App() {
 
   const [expandedTour, setExpandedTour] = useState(null);
   const [showTeamsTour, setShowTeamsTour] = useState(null);
+  const [expandedTeamId, setExpandedTeamId] = useState(null);
   const [expandedRounds, setExpandedRounds] = useState(null);
 
   const refreshTeams = useCallback(async () => {
@@ -213,6 +218,7 @@ export default function App() {
   useEffect(() => {
     if (!session) {
       setProfile(null);
+      setFriends([]);
       return;
     }
     supabase
@@ -224,7 +230,8 @@ export default function App() {
         if (error) return setErrorMsg(error.message);
         setProfile(data);
       });
-  }, [session]);
+    refreshFriends(session.user.id);
+  }, [session, refreshFriends]);
 
   const doRegister = async () => {
     setErrorMsg("");
@@ -271,6 +278,46 @@ export default function App() {
     setAvatarUploading(false);
     if (error) return setErrorMsg(error.message);
     setProfile((prev) => ({ ...prev, avatar_url: avatarUrl }));
+  };
+
+  const refreshFriends = useCallback(async (userId) => {
+    if (!userId) {
+      setFriends([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("friends")
+      .select("id, friend:profiles!friends_friend_id_fkey(id, username, avatar_url)")
+      .eq("user_id", userId);
+    if (error) return;
+    setFriends(data || []);
+  }, []);
+
+  const searchFriendCandidates = async (query) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setFriendResults([]);
+      return;
+    }
+    const { data, error } = await supabase.from("profiles").select("id, username, avatar_url").ilike("username", `%${q}%`).limit(6);
+    if (error) return;
+    const already = friends.map((f) => f.friend?.id);
+    const results = (data || []).filter((p) => p.id !== session?.user.id && !already.includes(p.id));
+    setFriendResults(results.slice(0, 5));
+  };
+
+  const addFriend = async (friendId) => {
+    const { error } = await supabase.from("friends").insert({ user_id: session.user.id, friend_id: friendId });
+    if (error) return setErrorMsg("Не удалось добавить в друзья (возможно, уже добавлен).");
+    setFriendQuery("");
+    setFriendResults([]);
+    refreshFriends(session.user.id);
+  };
+
+  const removeFriend = async (friendRowId) => {
+    const { error } = await supabase.from("friends").delete().eq("id", friendRowId);
+    if (error) return setErrorMsg(error.message);
+    refreshFriends(session.user.id);
   };
 
   const currentUsername = profile?.username || null;
@@ -807,14 +854,28 @@ export default function App() {
                           style={{ ...styles.ghostBtnSm, marginTop: 10 }}
                           onClick={() => setShowTeamsTour(showTeamsTour === tour.id ? null : tour.id)}
                         >
-                          {showTeamsTour === tour.id ? "Скрыть участников" : "Показать участников"}
+                          {showTeamsTour === tour.id ? "Скрыть команды" : "Показать команды"}
                         </button>
                         {showTeamsTour === tour.id && (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
                             {registeredTeams.map((t) => (
-                              <span key={t.id} style={styles.memberChip}>
-                                {teamLabel(t)}
-                              </span>
+                              <div key={t.id}>
+                                <span
+                                  style={{ ...styles.memberChip, cursor: "pointer" }}
+                                  onClick={() => setExpandedTeamId(expandedTeamId === t.id ? null : t.id)}
+                                >
+                                  {teamLabel(t)}
+                                </span>
+                                {expandedTeamId === t.id && (
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, paddingLeft: 12 }}>
+                                    {(t.team_members || []).map((m, i) => (
+                                      <span key={i} style={{ ...styles.memberChip, color: "#A08A8C" }}>
+                                        {m.member_name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             ))}
                           </div>
                         )}
@@ -1014,35 +1075,83 @@ export default function App() {
             </div>
 
             {session ? (
-              <div style={styles.card}>
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <div style={styles.avatarWrap}>
-                    {profile?.avatar_url ? (
-                      <img src={profile.avatar_url} alt="" style={styles.avatarImg} />
-                    ) : (
-                      <div style={styles.avatarFallback}>{(currentUsername || "?")[0].toUpperCase()}</div>
+              <>
+                <div style={styles.card}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={styles.avatarWrap}>
+                      {profile?.avatar_url ? (
+                        <img src={profile.avatar_url} alt="" style={styles.avatarImg} />
+                      ) : (
+                        <div style={styles.avatarFallback}>{(currentUsername || "?")[0].toUpperCase()}</div>
+                      )}
+                    </div>
+                    <div>
+                      <div style={styles.cardTitle}>{currentUsername || session.user.email}</div>
+                      <div style={styles.cardMeta}>Команд: {teams.filter((t) => t.owner_id === session.user.id).length}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ ...styles.hint, marginBottom: 6 }}>{avatarUploading ? "Загружаем аватар…" : "Сменить аватар:"}</div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={avatarUploading}
+                      onChange={(e) => uploadAvatar(e.target.files?.[0])}
+                      style={{ color: "#A08A8C", fontSize: 12.5 }}
+                    />
+                  </div>
+                  {profile?.is_admin && <div style={{ ...styles.hint, marginTop: 6 }}>Статус: администратор</div>}
+                  <button className="nur-btn" style={{ ...styles.ghostBtnSm, marginTop: 14 }} onClick={doLogout}>
+                    <LogOut size={13} /> Выйти
+                  </button>
+                </div>
+
+                <div style={styles.card}>
+                  <div style={styles.cardTitle}>Друзья ({friends.length})</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+                    {friends.length === 0 && <span style={styles.hint}>Пока никого не добавили.</span>}
+                    {friends.map((f) => (
+                      <div key={f.id} style={styles.friendRow}>
+                        <div style={styles.avatarWrapSm}>
+                          {f.friend?.avatar_url ? (
+                            <img src={f.friend.avatar_url} alt="" style={styles.avatarImgSm} />
+                          ) : (
+                            <div style={styles.avatarFallbackSm}>{(f.friend?.username || "?")[0].toUpperCase()}</div>
+                          )}
+                        </div>
+                        <span style={{ flex: 1, fontSize: 13.5 }}>{f.friend?.username}</span>
+                        <button style={styles.iconBtn} onClick={() => removeFriend(f.id)}>
+                          <X size={13} color="#FF5A5A" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ position: "relative", marginTop: 12 }}>
+                    <input
+                      className="nur-in"
+                      placeholder="Никнейм, чтобы добавить в друзья"
+                      value={friendQuery}
+                      onChange={(e) => {
+                        setFriendQuery(e.target.value);
+                        searchFriendCandidates(e.target.value);
+                      }}
+                      style={styles.input}
+                    />
+                    {friendResults.length > 0 && (
+                      <div style={styles.suggestBox}>
+                        {friendResults.map((p) => (
+                          <div key={p.id} style={{ ...styles.suggestItem, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span>{p.username}</span>
+                            <button className="nur-btn" style={styles.accentBtnSm} onClick={() => addFriend(p.id)}>
+                              <UserPlus size={12} /> Добавить
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  <div>
-                    <div style={styles.cardTitle}>{currentUsername || session.user.email}</div>
-                    <div style={styles.cardMeta}>Команд: {teams.filter((t) => t.owner_id === session.user.id).length}</div>
-                  </div>
                 </div>
-                <div style={{ marginTop: 12 }}>
-                  <div style={{ ...styles.hint, marginBottom: 6 }}>{avatarUploading ? "Загружаем аватар…" : "Сменить аватар:"}</div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={avatarUploading}
-                    onChange={(e) => uploadAvatar(e.target.files?.[0])}
-                    style={{ color: "#A08A8C", fontSize: 12.5 }}
-                  />
-                </div>
-                {profile?.is_admin && <div style={{ ...styles.hint, marginTop: 6 }}>Статус: администратор</div>}
-                <button className="nur-btn" style={{ ...styles.ghostBtnSm, marginTop: 14 }} onClick={doLogout}>
-                  <LogOut size={13} /> Выйти
-                </button>
-              </div>
+              </>
             ) : (
               <div style={styles.card}>
                 <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
@@ -1331,6 +1440,21 @@ const styles = {
     justifyContent: "center",
     fontFamily: "'Anton', sans-serif",
     fontSize: 22,
+  },
+  friendRow: { display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", background: "#0B0707", border: "1px solid #2A1315" },
+  avatarWrapSm: { width: 32, height: 32, flexShrink: 0 },
+  avatarImgSm: { width: 32, height: 32, borderRadius: "50%", objectFit: "cover", border: "1px solid #3A1418" },
+  avatarFallbackSm: {
+    width: 32,
+    height: 32,
+    borderRadius: "50%",
+    background: "#3A1418",
+    color: "#E4283A",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 14,
   },
   errorNote: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#FF5A5A", marginBottom: 14, padding: "8px 12px", border: "1px solid #FF5A5A33" },
   leaderRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "#0B0707", border: "1px solid #2A1315" },
