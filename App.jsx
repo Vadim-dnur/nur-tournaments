@@ -115,6 +115,14 @@ function teamLabel(team) {
   return team.tag ? `[${team.tag}] ${team.name}` : team.name;
 }
 
+function formatDateTime(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return `${day} в ${time}`;
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -139,17 +147,24 @@ export default function App() {
   const [teamExtras, setTeamExtras] = useState([]);
   const [teamSuggestions, setTeamSuggestions] = useState({});
   const [confirmDeleteTeamId, setConfirmDeleteTeamId] = useState(null);
+  const [addMemberQuery, setAddMemberQuery] = useState({});
+  const [addMemberResults, setAddMemberResults] = useState({});
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   const [newTourName, setNewTourName] = useState("");
   const [newTourMode, setNewTourMode] = useState("5x5");
   const [newTourPrize, setNewTourPrize] = useState("");
   const [newTourMaxTeams, setNewTourMaxTeams] = useState("");
   const [newTourBannerFile, setNewTourBannerFile] = useState(null);
+  const [newTourAnnounceAt, setNewTourAnnounceAt] = useState("");
+  const [newTourRegOpenAt, setNewTourRegOpenAt] = useState("");
+  const [newTourStartAt, setNewTourStartAt] = useState("");
   const [tourCreating, setTourCreating] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [regSelections, setRegSelections] = useState({});
 
   const [expandedTour, setExpandedTour] = useState(null);
+  const [showTeamsTour, setShowTeamsTour] = useState(null);
   const [expandedRounds, setExpandedRounds] = useState(null);
 
   const refreshTeams = useCallback(async () => {
@@ -164,7 +179,9 @@ export default function App() {
   const refreshTournaments = useCallback(async () => {
     const { data, error } = await supabase
       .from("tournaments")
-      .select("id, mode, name, status, banner_url, prize_pool, max_teams, created_at, tournament_teams(team_id)")
+      .select(
+        "id, mode, name, status, banner_url, prize_pool, max_teams, announce_at, reg_open_at, start_at, created_at, tournament_teams(team_id)"
+      )
       .order("created_at");
     if (error) return setErrorMsg(error.message);
     setTournaments(data || []);
@@ -200,7 +217,7 @@ export default function App() {
     }
     supabase
       .from("profiles")
-      .select("username, is_admin")
+      .select("username, is_admin, avatar_url")
       .eq("id", session.user.id)
       .single()
       .then(({ data, error }) => {
@@ -236,6 +253,24 @@ export default function App() {
   const doLogout = async () => {
     await supabase.auth.signOut();
     setActiveTab("tournaments");
+  };
+
+  const uploadAvatar = async (file) => {
+    if (!session || !file) return;
+    setAvatarUploading(true);
+    const ext = file.name.split(".").pop();
+    const path = `${session.user.id}/avatar.${ext}`;
+    const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+    if (upErr) {
+      setAvatarUploading(false);
+      return setErrorMsg("Не удалось загрузить аватар: " + upErr.message);
+    }
+    const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+    const avatarUrl = `${pub.publicUrl}?t=${Date.now()}`;
+    const { error } = await supabase.from("profiles").update({ avatar_url: avatarUrl }).eq("id", session.user.id);
+    setAvatarUploading(false);
+    if (error) return setErrorMsg(error.message);
+    setProfile((prev) => ({ ...prev, avatar_url: avatarUrl }));
   };
 
   const currentUsername = profile?.username || null;
@@ -317,6 +352,32 @@ export default function App() {
     refreshTeams();
   };
 
+  const searchTeammate = async (teamId, query) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setAddMemberResults((prev) => ({ ...prev, [teamId]: [] }));
+      return;
+    }
+    const team = teams.find((t) => t.id === teamId);
+    const taken = (team?.team_members || []).map((m) => m.member_name);
+    const { data, error } = await supabase.from("profiles").select("username").ilike("username", `%${q}%`).limit(6);
+    if (error) return;
+    const results = (data || []).map((d) => d.username).filter((n) => !taken.includes(n));
+    setAddMemberResults((prev) => ({ ...prev, [teamId]: results.slice(0, 5) }));
+  };
+
+  const addMemberToTeam = async (team, username) => {
+    if ((team.team_members || []).length >= team.max_size) {
+      setErrorMsg("Состав команды уже заполнен.");
+      return;
+    }
+    const { error } = await supabase.from("team_members").insert({ team_id: team.id, member_name: username });
+    if (error) return setErrorMsg(error.message);
+    setAddMemberQuery((prev) => ({ ...prev, [team.id]: "" }));
+    setAddMemberResults((prev) => ({ ...prev, [team.id]: [] }));
+    refreshTeams();
+  };
+
   const createTournament = async () => {
     if (!newTourName.trim()) return;
     setTourCreating(true);
@@ -337,6 +398,9 @@ export default function App() {
       prize_pool: newTourPrize.trim() || null,
       max_teams: newTourMaxTeams ? parseInt(newTourMaxTeams, 10) : null,
       banner_url,
+      announce_at: newTourAnnounceAt || null,
+      reg_open_at: newTourRegOpenAt || null,
+      start_at: newTourStartAt || null,
     });
     setTourCreating(false);
     if (error) return setErrorMsg(error.message);
@@ -344,6 +408,9 @@ export default function App() {
     setNewTourPrize("");
     setNewTourMaxTeams("");
     setNewTourBannerFile(null);
+    setNewTourAnnounceAt("");
+    setNewTourRegOpenAt("");
+    setNewTourStartAt("");
     refreshTournaments();
   };
 
@@ -590,17 +657,36 @@ export default function App() {
         * { box-sizing: border-box; }
         .nur-in::placeholder { color: #7A6668; }
         .nur-btn:disabled { opacity: .35; cursor: not-allowed; }
+        @keyframes nur-smoke-drift {
+          0%   { transform: translate(-3%, 0%) scale(1); }
+          50%  { transform: translate(3%, -4%) scale(1.12); }
+          100% { transform: translate(-3%, 0%) scale(1); }
+        }
+        .nur-smoke {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          opacity: 0.9;
+          background:
+            radial-gradient(ellipse 40% 70% at 15% 30%, rgba(228,40,58,0.30), transparent 60%),
+            radial-gradient(ellipse 35% 60% at 85% 60%, rgba(228,40,58,0.20), transparent 60%),
+            radial-gradient(ellipse 50% 80% at 50% 100%, rgba(255,122,69,0.14), transparent 65%);
+          filter: blur(26px);
+          animation: nur-smoke-drift 16s ease-in-out infinite;
+        }
       `}</style>
 
-      <div style={styles.nav}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ ...styles.nav, position: "relative", overflow: "hidden" }}>
+        <div className="nur-smoke" />
+        <div style={{ display: "flex", alignItems: "center", gap: 12, position: "relative", zIndex: 1 }}>
           <img src={logoImg} alt="NUR" style={styles.logoImg} />
           <span style={styles.logo}>
             NUR <span style={{ color: "#E4283A" }}>TOURNAMENTS</span>
           </span>
         </div>
 
-        <div style={styles.tabsRow}>
+        <div style={{ ...styles.tabsRow, position: "relative", zIndex: 1 }}>
           {[
             ["tournaments", "Турниры", Trophy],
             ["teams", "Команды", Users],
@@ -613,7 +699,7 @@ export default function App() {
           ))}
         </div>
 
-        <div style={styles.modeToggle}>
+        <div style={{ ...styles.modeToggle, position: "relative", zIndex: 1 }}>
           {["5x5", "2x2"].map((m) => (
             <button key={m} onClick={() => setActiveMode(m)} style={{ ...styles.modeBtn, ...(activeMode === m ? styles.modeBtnActive : {}) }}>
               {MODE_LABEL[m]}
@@ -706,6 +792,35 @@ export default function App() {
                       </div>
                     )}
 
+                    {(tour.announce_at || tour.reg_open_at || tour.start_at) && (
+                      <div style={styles.scheduleRow}>
+                        {tour.announce_at && <span>Анонс: {formatDateTime(tour.announce_at)}</span>}
+                        {tour.reg_open_at && <span>Регистрация: {formatDateTime(tour.reg_open_at)}</span>}
+                        {tour.start_at && <span>Старт: {formatDateTime(tour.start_at)}</span>}
+                      </div>
+                    )}
+
+                    {registeredTeams.length > 0 && (
+                      <>
+                        <button
+                          className="nur-btn"
+                          style={{ ...styles.ghostBtnSm, marginTop: 10 }}
+                          onClick={() => setShowTeamsTour(showTeamsTour === tour.id ? null : tour.id)}
+                        >
+                          {showTeamsTour === tour.id ? "Скрыть участников" : "Показать участников"}
+                        </button>
+                        {showTeamsTour === tour.id && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                            {registeredTeams.map((t) => (
+                              <span key={t.id} style={styles.memberChip}>
+                                {teamLabel(t)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+
                     {champion && (
                       <div style={styles.championBanner}>
                         <Trophy size={15} color="#E4283A" />
@@ -796,6 +911,34 @@ export default function App() {
                         </span>
                       ))}
                     </div>
+                    {(t.team_members || []).length < t.max_size && (
+                      <div style={{ position: "relative", marginTop: 10 }}>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <input
+                            className="nur-in"
+                            placeholder="Никнейм тиммейта для добавления"
+                            value={addMemberQuery[t.id] || ""}
+                            onChange={(e) => {
+                              setAddMemberQuery((prev) => ({ ...prev, [t.id]: e.target.value }));
+                              searchTeammate(t.id, e.target.value);
+                            }}
+                            style={{ ...styles.input, flex: 1 }}
+                          />
+                        </div>
+                        {(addMemberResults[t.id] || []).length > 0 && (
+                          <div style={styles.suggestBox}>
+                            {addMemberResults[t.id].map((name) => (
+                              <div key={name} style={{ ...styles.suggestItem, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <span>{name}</span>
+                                <button className="nur-btn" style={styles.accentBtnSm} onClick={() => addMemberToTeam(t, name)}>
+                                  <Plus size={12} /> Добавить
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {confirmDeleteTeamId === t.id && (
                       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                         <button style={{ ...styles.ghostBtnSm, borderColor: "#FF5A5A", color: "#FF5A5A" }} onClick={() => deleteTeam(t.id)}>
@@ -872,8 +1015,29 @@ export default function App() {
 
             {session ? (
               <div style={styles.card}>
-                <div style={styles.cardTitle}>{currentUsername || session.user.email}</div>
-                <div style={styles.cardMeta}>Команд: {teams.filter((t) => t.owner_id === session.user.id).length}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <div style={styles.avatarWrap}>
+                    {profile?.avatar_url ? (
+                      <img src={profile.avatar_url} alt="" style={styles.avatarImg} />
+                    ) : (
+                      <div style={styles.avatarFallback}>{(currentUsername || "?")[0].toUpperCase()}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div style={styles.cardTitle}>{currentUsername || session.user.email}</div>
+                    <div style={styles.cardMeta}>Команд: {teams.filter((t) => t.owner_id === session.user.id).length}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ ...styles.hint, marginBottom: 6 }}>{avatarUploading ? "Загружаем аватар…" : "Сменить аватар:"}</div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={avatarUploading}
+                    onChange={(e) => uploadAvatar(e.target.files?.[0])}
+                    style={{ color: "#A08A8C", fontSize: 12.5 }}
+                  />
+                </div>
                 {profile?.is_admin && <div style={{ ...styles.hint, marginTop: 6 }}>Статус: администратор</div>}
                 <button className="nur-btn" style={{ ...styles.ghostBtnSm, marginTop: 14 }} onClick={doLogout}>
                   <LogOut size={13} /> Выйти
@@ -970,6 +1134,20 @@ export default function App() {
                       onChange={(e) => setNewTourBannerFile(e.target.files?.[0] || null)}
                       style={{ color: "#A08A8C", fontSize: 12.5 }}
                     />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ ...styles.hint, marginBottom: 4 }}>Анонс</div>
+                      <input type="datetime-local" value={newTourAnnounceAt} onChange={(e) => setNewTourAnnounceAt(e.target.value)} style={styles.input} />
+                    </div>
+                    <div>
+                      <div style={{ ...styles.hint, marginBottom: 4 }}>Открытие регистрации</div>
+                      <input type="datetime-local" value={newTourRegOpenAt} onChange={(e) => setNewTourRegOpenAt(e.target.value)} style={styles.input} />
+                    </div>
+                    <div>
+                      <div style={{ ...styles.hint, marginBottom: 4 }}>Старт игры</div>
+                      <input type="datetime-local" value={newTourStartAt} onChange={(e) => setNewTourStartAt(e.target.value)} style={styles.input} />
+                    </div>
                   </div>
                   <button className="nur-btn" style={{ ...styles.accentBtnSm, marginTop: 12 }} onClick={createTournament} disabled={tourCreating || !newTourName.trim()}>
                     <Plus size={13} /> {tourCreating ? "Создаём…" : "Создать"}
@@ -1108,6 +1286,15 @@ const styles = {
   tourBanner: { width: "100%", height: 140, objectFit: "cover", display: "block" },
   tourBannerSm: { width: 56, height: 56, objectFit: "cover", flexShrink: 0 },
   prizeRow: { display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12.5, color: "#F1E7E7" },
+  scheduleRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 8,
+    fontSize: 11.5,
+    color: "#A08A8C",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
   regRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" },
   hint: { fontSize: 12, color: "#7A6668" },
   input: { background: "#0B0707", border: "1px solid #4A2226", color: "#F1E7E7", padding: "9px 10px", fontSize: 13.5, fontFamily: "'Inter', sans-serif", outline: "none" },
@@ -1131,6 +1318,20 @@ const styles = {
     overflowY: "auto",
   },
   suggestItem: { padding: "8px 10px", fontSize: 13, color: "#F1E7E7", cursor: "pointer" },
+  avatarWrap: { width: 56, height: 56, flexShrink: 0 },
+  avatarImg: { width: 56, height: 56, borderRadius: "50%", objectFit: "cover", border: "1px solid #3A1418" },
+  avatarFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: "50%",
+    background: "#3A1418",
+    color: "#E4283A",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 22,
+  },
   errorNote: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#FF5A5A", marginBottom: 14, padding: "8px 12px", border: "1px solid #FF5A5A33" },
   leaderRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "#0B0707", border: "1px solid #2A1315" },
   leaderRank: { width: 28, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, display: "flex", alignItems: "center" },
