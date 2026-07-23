@@ -31,7 +31,7 @@ const ROUND_GAP = 92;
 
 const MODE_LABEL = { "5x5": "5 НА 5", "2x2": "2 НА 2" };
 const STATUS_LABEL = { registration: "Регистрация", live: "Идёт турнир", finished: "Завершён" };
-const STATUS_COLOR = { registration: "#6B7280", live: "#E4283A", finished: "#5C5254" };
+const STATUS_COLOR = { registration: "#6B7280", live: "#D9414C", finished: "#5C5254" };
 
 // Ссылки, упоминания каналов/чатов и т.п. — запрещены в никнейме
 const LINK_PATTERNS = [
@@ -622,8 +622,8 @@ export default function App() {
   if (authLoading) {
     return (
       <div style={styles.loadingWrap}>
-        <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} color="#E4283A" />
-        <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "#A08A8C", fontSize: 13 }}>
+        <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} color="#D9414C" />
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "#AE9B99", fontSize: 13 }}>
           ЗАГРУЗКА ПЛАТФОРМЫ...
         </span>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -643,7 +643,7 @@ export default function App() {
         <div style={{ position: "relative", height: g.containerHeight, width: g.width, minWidth: g.width }}>
           <svg width={g.width} height={g.containerHeight} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
             {g.connectors.map((c) => (
-              <g key={c.key} stroke="#E4283A55" strokeWidth="1.5" fill="none" strokeDasharray="3 3">
+              <g key={c.key} stroke="#D9414C55" strokeWidth="1.5" fill="none" strokeDasharray="3 3">
                 <line x1={c.xLeft} y1={c.y1} x2={c.xMid} y2={c.y1} />
                 <line x1={c.xLeft} y1={c.y2} x2={c.xMid} y2={c.y2} />
                 <line x1={c.xMid} y1={c.y1} x2={c.xMid} y2={c.y2} />
@@ -663,7 +663,7 @@ export default function App() {
                   fontFamily: "'JetBrains Mono', monospace",
                   fontSize: 11,
                   letterSpacing: 1,
-                  color: "#A08A8C",
+                  color: "#AE9B99",
                 }}
               >
                 {roundLabel(totalRounds, r)}
@@ -692,7 +692,7 @@ export default function App() {
                               display: "flex",
                               alignItems: "center",
                               cursor: canDecide && slot.id ? "pointer" : "default",
-                              borderBottom: idx === 0 ? "1px solid #3A1418" : "none",
+                              borderBottom: idx === 0 ? "1px solid #3D2226" : "none",
                             }}
                           >
                             <div
@@ -703,8 +703,8 @@ export default function App() {
                                 alignItems: "center",
                                 padding: "0 10px",
                                 fontSize: 12.5,
-                                borderLeft: isWinner ? "2px solid #E4283A" : "2px solid transparent",
-                                color: isLoser ? "#7A6668" : isWinner ? "#F5C242" : "#F1E7E7",
+                                borderLeft: isWinner ? "2px solid #D9414C" : "2px solid transparent",
+                                color: isLoser ? "#8C7876" : isWinner ? "#E8B84D" : "#F3ECEA",
                                 textDecoration: isLoser ? "line-through" : "none",
                               }}
                             >
@@ -728,7 +728,7 @@ export default function App() {
     <div style={styles.page}>
       <style>{`
         * { box-sizing: border-box; }
-        .nur-in::placeholder { color: #7A6668; }
+        .nur-in::placeholder { color: #8C7876; }
         .nur-btn:disabled { opacity: .35; cursor: not-allowed; }
         @keyframes nur-smoke-drift {
           0%   { transform: translate(-3%, 0%) scale(1); }
@@ -750,8 +750,10 @@ export default function App() {
         }
       `}</style>
 
-      <div style={{ ...styles.nav, position: "relative", overflow: "hidden" }}>
-        <div className="nur-smoke" />
+      <div style={{ ...styles.nav, position: "relative" }}>
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 0, pointerEvents: "none" }}>
+          <div className="nur-smoke" />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 20, position: "relative", zIndex: 1 }}>
           <div
             style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
@@ -762,7 +764,7 @@ export default function App() {
           >
             <img src={logoImg} alt="NUR" style={styles.logoImg} />
             <span style={styles.logo}>
-              NUR <span style={{ color: "#E4283A" }}>TOURNAMENTS</span>
+              NUR <span style={{ color: "#D9414C" }}>TOURNAMENTS</span>
             </span>
           </div>
           <button
@@ -800,7 +802,7 @@ export default function App() {
             <div style={{ position: "relative" }}>
               <div style={styles.avatarPill} onClick={() => setNavMenuOpen(!navMenuOpen)}>
                 <div style={{ position: "relative" }}>
-                  <Bell size={16} color="#A08A8C" />
+                  <Bell size={16} color="#AE9B99" />
                   {incomingRequests.length > 0 && <span style={styles.notifyDot} />}
                 </div>
                 <div style={styles.avatarWrapPill}>
@@ -810,8 +812,8 @@ export default function App() {
                     <div style={styles.avatarFallbackPill}>{(currentUsername || "?")[0].toUpperCase()}</div>
                   )}
                 </div>
-                <span style={{ fontSize: 12.5, color: "#F1E7E7" }}>{currentUsername}</span>
-                <ChevronDown size={13} color="#A08A8C" />
+                <span style={{ fontSize: 12.5, color: "#F3ECEA" }}>{currentUsername}</span>
+                <ChevronDown size={13} color="#AE9B99" />
               </div>
 
               {navMenuOpen && (
@@ -824,7 +826,7 @@ export default function App() {
                       setNavMenuOpen(false);
                     }}
                   >
-                    <ShieldPlus size={15} color="#E4283A" /> Создать команду
+                    <ShieldPlus size={15} color="#D9414C" /> Создать команду
                   </button>
                   <button
                     style={styles.navDropdownItem}
@@ -833,7 +835,7 @@ export default function App() {
                       setNavMenuOpen(false);
                     }}
                   >
-                    <Users size={15} color="#E4283A" /> Мои команды
+                    <Users size={15} color="#D9414C" /> Мои команды
                   </button>
                   <button
                     style={styles.navDropdownItem}
@@ -842,7 +844,7 @@ export default function App() {
                       setNavMenuOpen(false);
                     }}
                   >
-                    <UserIcon size={15} color="#E4283A" /> Профиль{incomingRequests.length > 0 ? ` (${incomingRequests.length})` : ""}
+                    <UserIcon size={15} color="#D9414C" /> Профиль{incomingRequests.length > 0 ? ` (${incomingRequests.length})` : ""}
                   </button>
                   {profile?.is_admin && (
                     <button
@@ -852,12 +854,12 @@ export default function App() {
                         setNavMenuOpen(false);
                       }}
                     >
-                      <Settings size={15} color="#E4283A" /> Админ-панель
+                      <Settings size={15} color="#D9414C" /> Админ-панель
                     </button>
                   )}
-                  <div style={{ height: 1, background: "#3A1418", margin: "4px 0" }} />
+                  <div style={{ height: 1, background: "#3D2226", margin: "4px 0" }} />
                   <button
-                    style={{ ...styles.navDropdownItem, color: "#A08A8C" }}
+                    style={{ ...styles.navDropdownItem, color: "#AE9B99" }}
                     onClick={() => {
                       doLogout();
                       setNavMenuOpen(false);
@@ -876,7 +878,7 @@ export default function App() {
         <img src={promoImg} alt="NUR FAST CUP" style={styles.promoImg} />
         <div style={styles.promoText}>
           <div style={styles.promoTitle}>
-            <Megaphone size={14} color="#E4283A" /> Актуальный турнир анонсирован в Telegram
+            <Megaphone size={14} color="#D9414C" /> Актуальный турнир анонсирован в Telegram
           </div>
           <div style={styles.promoSub}>Все новости, объявления и регистрация команд — в канале. Нажми, чтобы перейти →</div>
         </div>
@@ -892,14 +894,14 @@ export default function App() {
         {activeTab === "tournaments" && (
           <div style={styles.stack}>
             <div style={styles.sectionHead}>
-              <Swords size={16} color="#E4283A" />
+              <Swords size={16} color="#D9414C" />
               <span style={styles.sectionTitle}>ТУРНИРЫ · {MODE_LABEL[activeMode]}</span>
             </div>
 
             <div style={styles.card}>
               <div style={styles.cardHeadRow}>
                 <div style={styles.cardTitle}>Топ команд · {MODE_LABEL[activeMode]}</div>
-                <Trophy size={15} color="#E4283A" />
+                <Trophy size={15} color="#D9414C" />
               </div>
               {leaderboard.length === 0 ? (
                 <div style={{ ...styles.hint, marginTop: 10 }}>
@@ -909,7 +911,7 @@ export default function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
                   {leaderboard.map((t, i) => (
                     <div key={t.id} style={styles.leaderRow}>
-                      <span style={{ ...styles.leaderRank, color: i === 0 ? "#E4283A" : "#A08A8C" }}>
+                      <span style={{ ...styles.leaderRank, color: i === 0 ? "#D9414C" : "#AE9B99" }}>
                         {i === 0 ? <Trophy size={13} /> : `#${i + 1}`}
                       </span>
                       <span style={styles.leaderName}>{t.name}</span>
@@ -952,7 +954,7 @@ export default function App() {
 
                     {tour.prize_pool && (
                       <div style={styles.prizeRow}>
-                        <Trophy size={13} color="#E4283A" /> {tour.prize_pool}
+                        <Trophy size={13} color="#D9414C" /> {tour.prize_pool}
                       </div>
                     )}
 
@@ -986,7 +988,7 @@ export default function App() {
                                 {expandedTeamId === t.id && (
                                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, paddingLeft: 12 }}>
                                     {(t.team_members || []).map((m, i) => (
-                                      <span key={i} style={{ ...styles.memberChip, color: "#A08A8C" }}>
+                                      <span key={i} style={{ ...styles.memberChip, color: "#AE9B99" }}>
                                         {m.member_name}
                                       </span>
                                     ))}
@@ -1001,8 +1003,8 @@ export default function App() {
 
                     {champion && (
                       <div style={styles.championBanner}>
-                        <Trophy size={15} color="#E4283A" />
-                        Победитель: <b style={{ color: "#E4283A" }}>{teamLabel(champion)}</b>
+                        <Trophy size={15} color="#D9414C" />
+                        Победитель: <b style={{ color: "#D9414C" }}>{teamLabel(champion)}</b>
                       </div>
                     )}
 
@@ -1055,7 +1057,7 @@ export default function App() {
         {activeTab === "teams" && (
           <div style={styles.stack}>
             <div style={styles.sectionHead}>
-              <Users size={16} color="#E4283A" />
+              <Users size={16} color="#D9414C" />
               <span style={styles.sectionTitle}>МОИ КОМАНДЫ · {MODE_LABEL[activeMode]}</span>
             </div>
 
@@ -1070,7 +1072,7 @@ export default function App() {
                   <div key={t.id} style={styles.card}>
                     <div style={styles.cardHeadRow}>
                       <div style={styles.cardTitle}>
-                        {t.tag && <span style={{ color: "#E4283A" }}>[{t.tag}] </span>}
+                        {t.tag && <span style={{ color: "#D9414C" }}>[{t.tag}] </span>}
                         {t.name}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1146,7 +1148,7 @@ export default function App() {
                       <input className="nur-in" placeholder="Название команды" value={teamName} onChange={(e) => setTeamName(e.target.value)} style={{ ...styles.input, flex: 1 }} />
                       <input className="nur-in" placeholder="Тег" value={teamTag} maxLength={5} onChange={(e) => setTeamTag(e.target.value)} style={{ ...styles.input, width: 80 }} />
                     </div>
-                    <div style={{ marginTop: 10, fontSize: 12, color: "#7A6668" }}>Капитан: {currentUsername}. Добавьте остальных участников состава:</div>
+                    <div style={{ marginTop: 10, fontSize: 12, color: "#8C7876" }}>Капитан: {currentUsername}. Добавьте остальных участников состава:</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
                       {teamExtras.map((val, i) => (
                         <div key={i} style={{ position: "relative" }}>
@@ -1187,7 +1189,7 @@ export default function App() {
         {activeTab === "profile" && (
           <div style={{ ...styles.stack, maxWidth: 380 }}>
             <div style={styles.sectionHead}>
-              <ShieldCheck size={16} color="#E4283A" />
+              <ShieldCheck size={16} color="#D9414C" />
               <span style={styles.sectionTitle}>ПРОФИЛЬ</span>
             </div>
 
@@ -1214,7 +1216,7 @@ export default function App() {
                       accept="image/*"
                       disabled={avatarUploading}
                       onChange={(e) => uploadAvatar(e.target.files?.[0])}
-                      style={{ color: "#A08A8C", fontSize: 12.5 }}
+                      style={{ color: "#AE9B99", fontSize: 12.5 }}
                     />
                   </div>
                   {profile?.is_admin && <div style={{ ...styles.hint, marginTop: 6 }}>Статус: администратор</div>}
@@ -1342,7 +1344,7 @@ export default function App() {
         {activeTab === "admin" && (
           <div style={styles.stack}>
             <div style={styles.sectionHead}>
-              <Settings size={16} color="#E4283A" />
+              <Settings size={16} color="#D9414C" />
               <span style={styles.sectionTitle}>АДМИН-ПАНЕЛЬ</span>
             </div>
 
@@ -1389,7 +1391,7 @@ export default function App() {
                       type="file"
                       accept="image/*"
                       onChange={(e) => setNewTourBannerFile(e.target.files?.[0] || null)}
-                      style={{ color: "#A08A8C", fontSize: 12.5 }}
+                      style={{ color: "#AE9B99", fontSize: 12.5 }}
                     />
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
@@ -1423,7 +1425,7 @@ export default function App() {
                         {tour.banner_url && <img src={tour.banner_url} alt={tour.name} style={styles.tourBannerSm} />}
                         <div style={{ flex: 1 }}>
                           <div style={styles.cardTitle}>
-                            {tour.name} <span style={{ color: "#7A6668", fontSize: 12 }}>· {MODE_LABEL[tour.mode]}</span>
+                            {tour.name} <span style={{ color: "#8C7876", fontSize: 12 }}>· {MODE_LABEL[tour.mode]}</span>
                           </div>
                           <div style={styles.cardMeta}>
                             {registeredTeams.length}
@@ -1431,7 +1433,7 @@ export default function App() {
                           </div>
                           {tour.prize_pool && (
                             <div style={{ ...styles.prizeRow, marginTop: 6 }}>
-                              <Trophy size={12} color="#E4283A" /> {tour.prize_pool}
+                              <Trophy size={12} color="#D9414C" /> {tour.prize_pool}
                             </div>
                           )}
                         </div>
@@ -1488,18 +1490,18 @@ export default function App() {
 }
 
 const styles = {
-  page: { minHeight: "100vh", background: "#0B0707", color: "#F1E7E7", fontFamily: "'Inter', sans-serif" },
-  loadingWrap: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, background: "#0B0707" },
-  nav: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14, padding: "14px 22px", borderBottom: "1px solid #2A1315", background: "#100909" },
-  logoImg: { width: 38, height: 38, borderRadius: 7, objectFit: "cover", boxShadow: "0 0 0 1px #3A1418, 0 0 14px #E4283A55" },
+  page: { minHeight: "100vh", background: "#0E0B0C", color: "#F3ECEA", fontFamily: "'Inter', sans-serif" },
+  loadingWrap: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, background: "#0E0B0C" },
+  nav: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14, padding: "14px 22px", borderBottom: "1px solid #2E1B1E", background: "#150F10" },
+  logoImg: { width: 38, height: 38, borderRadius: 7, objectFit: "cover", boxShadow: "0 0 0 1px #3D2226, 0 0 14px #D9414C55" },
   logo: {
     fontFamily: "'Anton', 'Teko', sans-serif",
     fontWeight: 400,
     fontSize: 22,
     letterSpacing: 0.5,
     textTransform: "uppercase",
-    color: "#F1E7E7",
-    textShadow: "0 0 18px #E4283A66",
+    color: "#F3ECEA",
+    textShadow: "0 0 18px #D9414C66",
   },
   promoBanner: {
     display: "flex",
@@ -1508,8 +1510,8 @@ const styles = {
     maxWidth: 880,
     margin: "18px auto 0",
     padding: 10,
-    border: "1px solid #3A1418",
-    background: "linear-gradient(90deg, #170D0E 0%, #1F1011 100%)",
+    border: "1px solid #3D2226",
+    background: "linear-gradient(90deg, #1C1416 0%, #241618 100%)",
     textDecoration: "none",
     cursor: "pointer",
   },
@@ -1521,68 +1523,68 @@ const styles = {
     gap: 6,
     fontSize: 13.5,
     fontWeight: 600,
-    color: "#F1E7E7",
+    color: "#F3ECEA",
   },
-  promoSub: { fontSize: 12, color: "#A08A8C" },
-  tabsRow: { display: "flex", gap: 4, background: "#170D0E", padding: 4, border: "1px solid #2A1315" },
-  tabBtn: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "#A08A8C", fontSize: 12.5, padding: "7px 12px", cursor: "pointer", fontFamily: "'Inter', sans-serif" },
-  tabBtnActive: { background: "#E4283A", color: "#F1E7E7", fontWeight: 600 },
-  modeToggle: { display: "flex", gap: 4, background: "#170D0E", padding: 4, border: "1px solid #2A1315" },
-  modeBtn: { background: "transparent", border: "none", color: "#A08A8C", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, padding: "7px 12px", cursor: "pointer" },
-  modeBtnActive: { background: "#FF7A45", color: "#170D0E", fontWeight: 600 },
+  promoSub: { fontSize: 12, color: "#AE9B99" },
+  tabsRow: { display: "flex", gap: 4, background: "#1C1416", padding: 4, border: "1px solid #2E1B1E" },
+  tabBtn: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "#AE9B99", fontSize: 12.5, padding: "7px 12px", cursor: "pointer", fontFamily: "'Inter', sans-serif" },
+  tabBtnActive: { background: "#D9414C", color: "#F3ECEA", fontWeight: 600 },
+  modeToggle: { display: "flex", gap: 4, background: "#1C1416", padding: 4, border: "1px solid #2E1B1E" },
+  modeBtn: { background: "transparent", border: "none", color: "#AE9B99", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5, padding: "7px 12px", cursor: "pointer" },
+  modeBtnActive: { background: "#E8A33D", color: "#1C1416", fontWeight: 600 },
   body: { maxWidth: 880, margin: "0 auto", padding: "26px 20px 60px" },
   stack: { display: "flex", flexDirection: "column", gap: 14 },
   sectionHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 },
-  sectionTitle: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, letterSpacing: 1.5, color: "#E6D9DA" },
-  card: { border: "1px solid #3A1418", background: "#170D0E", padding: 18 },
+  sectionTitle: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, letterSpacing: 1.5, color: "#E8DCDB" },
+  card: { border: "1px solid #3D2226", background: "#1C1416", padding: 18 },
   cardHeadRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 },
   cardTitle: { fontSize: 15.5, fontWeight: 600 },
-  cardMeta: { fontSize: 12, color: "#A08A8C", marginTop: 3 },
-  badge: { fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, letterSpacing: 0.5, border: "1px solid #4A2226", padding: "3px 8px", color: "#E6D9DA", whiteSpace: "nowrap" },
-  championBanner: { marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "8px 12px", border: "1px solid #E4283A55", background: "#E4283A14" },
+  cardMeta: { fontSize: 12, color: "#AE9B99", marginTop: 3 },
+  badge: { fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, letterSpacing: 0.5, border: "1px solid #4A2C2F", padding: "3px 8px", color: "#E8DCDB", whiteSpace: "nowrap" },
+  championBanner: { marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "8px 12px", border: "1px solid #D9414C55", background: "#D9414C14" },
   tourBanner: { width: "100%", height: 140, objectFit: "cover", display: "block" },
   tourBannerSm: { width: 56, height: 56, objectFit: "cover", flexShrink: 0 },
-  prizeRow: { display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12.5, color: "#F1E7E7" },
+  prizeRow: { display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12.5, color: "#F3ECEA" },
   scheduleRow: {
     display: "flex",
     flexWrap: "wrap",
     gap: 12,
     marginTop: 8,
     fontSize: 11.5,
-    color: "#A08A8C",
+    color: "#AE9B99",
     fontFamily: "'JetBrains Mono', monospace",
   },
   regRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" },
-  hint: { fontSize: 12, color: "#7A6668" },
-  input: { background: "#0B0707", border: "1px solid #4A2226", color: "#F1E7E7", padding: "9px 10px", fontSize: 13.5, fontFamily: "'Inter', sans-serif", outline: "none" },
-  select: { background: "#0B0707", border: "1px solid #4A2226", color: "#F1E7E7", padding: "9px 10px", fontSize: 13, outline: "none" },
-  accentBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#E4283A", color: "#FFFFFF", border: "none", padding: "10px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer" },
-  accentBtnSm: { display: "flex", alignItems: "center", gap: 6, background: "#E4283A", color: "#FFFFFF", border: "none", padding: "8px 12px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" },
-  ghostBtnSm: { display: "flex", alignItems: "center", gap: 6, background: "transparent", color: "#A08A8C", border: "1px solid #4A2226", padding: "8px 12px", fontSize: 12.5, cursor: "pointer" },
-  iconBtn: { background: "transparent", border: "1px solid #4A2226", padding: 6, cursor: "pointer", color: "#A08A8C" },
-  segBtn: { flex: 1, background: "#0B0707", border: "1px solid #4A2226", color: "#A08A8C", padding: "8px 0", fontSize: 12.5, cursor: "pointer" },
-  segBtnActive: { background: "#E4283A", color: "#FFFFFF", borderColor: "#E4283A", fontWeight: 600 },
-  memberChip: { fontSize: 12, background: "#0B0707", border: "1px solid #2A1315", padding: "4px 9px", color: "#E6D9DA" },
+  hint: { fontSize: 12, color: "#8C7876" },
+  input: { background: "#0E0B0C", border: "1px solid #4A2C2F", color: "#F3ECEA", padding: "9px 10px", fontSize: 13.5, fontFamily: "'Inter', sans-serif", outline: "none" },
+  select: { background: "#0E0B0C", border: "1px solid #4A2C2F", color: "#F3ECEA", padding: "9px 10px", fontSize: 13, outline: "none" },
+  accentBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#D9414C", color: "#FFFFFF", border: "none", padding: "10px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer" },
+  accentBtnSm: { display: "flex", alignItems: "center", gap: 6, background: "#D9414C", color: "#FFFFFF", border: "none", padding: "8px 12px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" },
+  ghostBtnSm: { display: "flex", alignItems: "center", gap: 6, background: "transparent", color: "#AE9B99", border: "1px solid #4A2C2F", padding: "8px 12px", fontSize: 12.5, cursor: "pointer" },
+  iconBtn: { background: "transparent", border: "1px solid #4A2C2F", padding: 6, cursor: "pointer", color: "#AE9B99" },
+  segBtn: { flex: 1, background: "#0E0B0C", border: "1px solid #4A2C2F", color: "#AE9B99", padding: "8px 0", fontSize: 12.5, cursor: "pointer" },
+  segBtnActive: { background: "#D9414C", color: "#FFFFFF", borderColor: "#D9414C", fontWeight: 600 },
+  memberChip: { fontSize: 12, background: "#0E0B0C", border: "1px solid #2E1B1E", padding: "4px 9px", color: "#E8DCDB" },
   suggestBox: {
     position: "absolute",
     top: "calc(100% + 2px)",
     left: 0,
     right: 0,
     zIndex: 5,
-    background: "#170D0E",
-    border: "1px solid #4A2226",
+    background: "#1C1416",
+    border: "1px solid #4A2C2F",
     maxHeight: 160,
     overflowY: "auto",
   },
-  suggestItem: { padding: "8px 10px", fontSize: 13, color: "#F1E7E7", cursor: "pointer" },
+  suggestItem: { padding: "8px 10px", fontSize: 13, color: "#F3ECEA", cursor: "pointer" },
   avatarWrap: { width: 56, height: 56, flexShrink: 0 },
-  avatarImg: { width: 56, height: 56, borderRadius: "50%", objectFit: "cover", border: "1px solid #3A1418" },
+  avatarImg: { width: 56, height: 56, borderRadius: "50%", objectFit: "cover", border: "1px solid #3D2226" },
   avatarFallback: {
     width: 56,
     height: 56,
     borderRadius: "50%",
-    background: "#3A1418",
-    color: "#E4283A",
+    background: "#3D2226",
+    color: "#D9414C",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1593,35 +1595,35 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    background: "#170D0E",
-    border: "1px solid #3A1418",
+    background: "#1C1416",
+    border: "1px solid #3D2226",
     borderRadius: 20,
     padding: "6px 14px 6px 12px",
     cursor: "pointer",
   },
   avatarWrapPill: { width: 26, height: 26, flexShrink: 0 },
-  avatarImgPill: { width: 26, height: 26, borderRadius: "50%", objectFit: "cover", border: "1px solid #E4283A" },
+  avatarImgPill: { width: 26, height: 26, borderRadius: "50%", objectFit: "cover", border: "1px solid #D9414C" },
   avatarFallbackPill: {
     width: 26,
     height: 26,
     borderRadius: "50%",
-    background: "#3A1418",
-    border: "1px solid #E4283A",
-    color: "#E4283A",
+    background: "#3D2226",
+    border: "1px solid #D9414C",
+    color: "#D9414C",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     fontFamily: "'Anton', sans-serif",
     fontSize: 12,
   },
-  notifyDot: { position: "absolute", top: -2, right: -3, width: 7, height: 7, borderRadius: "50%", background: "#E4283A" },
+  notifyDot: { position: "absolute", top: -2, right: -3, width: 7, height: 7, borderRadius: "50%", background: "#D9414C" },
   navDropdown: {
     position: "absolute",
     top: "calc(100% + 8px)",
     right: 0,
     width: 220,
-    background: "#170D0E",
-    border: "1px solid #3A1418",
+    background: "#1C1416",
+    border: "1px solid #3D2226",
     borderRadius: 8,
     padding: 6,
     zIndex: 20,
@@ -1633,22 +1635,22 @@ const styles = {
     width: "100%",
     background: "transparent",
     border: "none",
-    color: "#F1E7E7",
+    color: "#F3ECEA",
     fontSize: 13,
     padding: "9px 10px",
     cursor: "pointer",
     textAlign: "left",
     fontFamily: "'Inter', sans-serif",
   },
-  friendRow: { display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", background: "#0B0707", border: "1px solid #2A1315" },
+  friendRow: { display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", background: "#0E0B0C", border: "1px solid #2E1B1E" },
   avatarWrapSm: { width: 32, height: 32, flexShrink: 0 },
-  avatarImgSm: { width: 32, height: 32, borderRadius: "50%", objectFit: "cover", border: "1px solid #3A1418" },
+  avatarImgSm: { width: 32, height: 32, borderRadius: "50%", objectFit: "cover", border: "1px solid #3D2226" },
   avatarFallbackSm: {
     width: 32,
     height: 32,
     borderRadius: "50%",
-    background: "#3A1418",
-    color: "#E4283A",
+    background: "#3D2226",
+    color: "#D9414C",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1656,9 +1658,9 @@ const styles = {
     fontSize: 14,
   },
   errorNote: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#FF5A5A", marginBottom: 14, padding: "8px 12px", border: "1px solid #FF5A5A33" },
-  leaderRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "#0B0707", border: "1px solid #2A1315" },
+  leaderRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "#0E0B0C", border: "1px solid #2E1B1E" },
   leaderRank: { width: 28, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, display: "flex", alignItems: "center" },
   leaderName: { flex: 1, fontSize: 13 },
-  leaderStat: { fontSize: 11.5, color: "#A08A8C", fontFamily: "'JetBrains Mono', monospace" },
-  matchCard: { width: "100%", height: "100%", background: "#100909", border: "1px solid #3A1418" },
+  leaderStat: { fontSize: 11.5, color: "#AE9B99", fontFamily: "'JetBrains Mono', monospace" },
+  matchCard: { width: "100%", height: "100%", background: "#150F10", border: "1px solid #3D2226" },
 };
