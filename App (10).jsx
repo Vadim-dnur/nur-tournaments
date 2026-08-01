@@ -1,0 +1,5185 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { supabase } from "./supabaseClient";
+import logoImg from "./logo.jpg";
+import promoImg from "./promo.jpg";
+import sndKeyboardClick from "./sound-keyboard-click.mp3";
+import sndModernClick from "./sound-modern-click.wav";
+import sndHardTypewriter from "./sound-hard-typewriter.wav";
+import sndSoftTypewriter from "./sound-soft-typewriter.wav";
+import sndBubbleClick from "./sound-bubble-click.wav";
+import sndMouseClick from "./sound-mouse-click.wav";
+import {
+  Trophy,
+  LogIn,
+  LogOut,
+  Users,
+  UserPlus,
+  User as UserIcon,
+  Plus,
+  X,
+  Check,
+  Swords,
+  Settings,
+  ShieldPlus,
+  Trash2,
+  ShieldCheck,
+  Loader2,
+  ShieldAlert,
+  Megaphone,
+  Bell,
+  ChevronDown,
+  MessageCircle,
+  LifeBuoy,
+} from "lucide-react";
+
+const CARD_W = 200;
+const CARD_H = 60;
+const SLOT0 = 86;
+const ROUND_GAP = 92;
+
+const MODE_LABEL = { "5x5": "5 НА 5", "2x2": "2 НА 2" };
+const STATUS_LABEL = { registration: "Регистрация", live: "Идёт турнир", finished: "Завершён" };
+const MAP_POOL = ["dust2", "mirage", "nuke", "overpass", "train", "anubis", "inferno", "rialto"];
+const MAP_LABEL = {
+  dust2: "Dust2",
+  mirage: "Mirage",
+  nuke: "Nuke",
+  overpass: "Overpass",
+  train: "Train",
+  anubis: "Anubis",
+  inferno: "Inferno",
+  rialto: "Rialto",
+};
+const MAP_GRADIENT = {
+  dust2: "linear-gradient(150deg,#c9a227,#7a5a12 55%,#2b1f08)",
+  mirage: "linear-gradient(150deg,#d99a4e,#8a5524 55%,#2c1a0b)",
+  nuke: "linear-gradient(150deg,#8fa6b5,#3f5a6b 55%,#131f26)",
+  overpass: "linear-gradient(150deg,#7fae7a,#39683d 55%,#122016)",
+  train: "linear-gradient(150deg,#9aa3ad,#4b535c 55%,#171a1e)",
+  anubis: "linear-gradient(150deg,#c98a3c,#7d4a1c 55%,#2a1608)",
+  inferno: "linear-gradient(150deg,#c25a3a,#7d2f1c 55%,#2a0d08)",
+  rialto: "linear-gradient(150deg,#6f8fc9,#334a78 55%,#111826)",
+};
+const STATUS_COLOR = { registration: "#6B7280", live: "#D9414C", finished: "#5C5254" };
+
+let sharedAudioCtx = null;
+function unlockCoinflipAudio() {
+  if (!sharedAudioCtx) sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume();
+}
+function playReelTick() {
+  const ac = sharedAudioCtx;
+  if (!ac) return;
+  const t = ac.currentTime;
+  const o = ac.createOscillator();
+  const g = ac.createGain();
+  const f = ac.createBiquadFilter();
+  o.type = "square";
+  o.frequency.setValueAtTime(1200 + Math.random() * 300, t);
+  f.type = "bandpass";
+  f.frequency.value = 1800;
+  f.Q.value = 6;
+  g.gain.setValueAtTime(0.05, t);
+  g.gain.exponentialRampToValueAtTime(0.0008, t + 0.05);
+  o.connect(f);
+  f.connect(g);
+  g.connect(ac.destination);
+  o.start(t);
+  o.stop(t + 0.06);
+}
+function playReelLock() {
+  const ac = sharedAudioCtx;
+  if (!ac) return;
+  const t = ac.currentTime;
+  const o = ac.createOscillator();
+  const g = ac.createGain();
+  o.type = "triangle";
+  o.frequency.setValueAtTime(320, t);
+  o.frequency.exponentialRampToValueAtTime(90, t + 0.16);
+  g.gain.setValueAtTime(0.28, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+  o.connect(g);
+  g.connect(ac.destination);
+  o.start(t);
+  o.stop(t + 0.3);
+}
+function playReelWin() {
+  const ac = sharedAudioCtx;
+  if (!ac) return;
+  [523, 659, 784, 1047].forEach((hz, i) => {
+    const t = ac.currentTime + i * 0.09;
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(hz, t);
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
+    o.connect(g);
+    g.connect(ac.destination);
+    o.start(t);
+    o.stop(t + 0.45);
+  });
+}
+
+const REEL_CELL = 70;
+const REEL_HEIGHT = 210;
+const REEL_REPEAT = 24;
+const REEL_CENTER_OFFSET = (REEL_HEIGHT - REEL_CELL) / 2;
+
+function CoinflipMachine({ coinflip, canSpin, onSpin }) {
+  const stripRefs = [useRef(null), useRef(null), useRef(null)];
+  const frameRefs = [useRef(null), useRef(null), useRef(null)];
+  const animatedForRef = useRef(null);
+  const [spinning, setSpinning] = useState(false);
+
+  useEffect(() => {
+    stripRefs.forEach((r) => {
+      if (r.current) r.current.style.transform = `translateY(${REEL_CENTER_OFFSET - REEL_CELL * 4}px)`;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (coinflip.status === "completed" && coinflip.reel_results && animatedForRef.current !== coinflip.id) {
+      animatedForRef.current = coinflip.id;
+      setSpinning(true);
+      const durations = [2300, 2900, 3500];
+      coinflip.reel_results.forEach((isCT, i) => {
+        const strip = stripRefs[i].current;
+        const frame = frameRefs[i].current;
+        if (!strip || !frame) return;
+        frame.classList.add("nur-reel-spinning");
+        frame.classList.remove("nur-reel-locked");
+        const loops = 9 + i * 2;
+        const targetIndex = loops * 2 + (isCT ? 0 : 1);
+        strip.style.transition = "none";
+        strip.style.transform = `translateY(${REEL_CENTER_OFFSET - REEL_CELL * 4}px)`;
+        void strip.offsetWidth;
+        strip.style.transition = `transform ${durations[i]}ms cubic-bezier(.12,.66,.16,1)`;
+        strip.style.transform = `translateY(${REEL_CENTER_OFFSET - REEL_CELL * targetIndex}px)`;
+
+        let elapsed = 0;
+        const scheduleTick = () => {
+          if (elapsed >= durations[i] - 120) return;
+          const p = elapsed / durations[i];
+          const gap = 45 + p * p * 260;
+          elapsed += gap;
+          setTimeout(() => {
+            playReelTick();
+            scheduleTick();
+          }, gap);
+        };
+        scheduleTick();
+
+        setTimeout(() => {
+          frame.classList.remove("nur-reel-spinning");
+          frame.classList.add("nur-reel-locked", "nur-reel-pop");
+          playReelLock();
+          setTimeout(() => frame.classList.remove("nur-reel-pop"), 600);
+          if (i === 2) {
+            setTimeout(() => {
+              setSpinning(false);
+              playReelWin();
+            }, 500);
+          }
+        }, durations[i]);
+      });
+    }
+  }, [coinflip.status, coinflip.id, coinflip.reel_results]);
+
+  return (
+    <div>
+      <div style={styles.coinflipMachine}>
+        <div style={styles.reelsRow}>
+          {[0, 1, 2].map((i) => (
+            <div key={i} ref={frameRefs[i]} className="nur-reel-frame" style={styles.reelFrame}>
+              <div className="nur-reel-payline" style={styles.reelPayline} />
+              <div ref={stripRefs[i]} className="nur-reel-strip" style={styles.reelStrip}>
+                {Array.from({ length: REEL_REPEAT }).map((_, r) => (
+                  <div key={r} style={{ display: "contents" }}>
+                    <div style={{ ...styles.reelCell, color: "#a8c8f0", textShadow: "0 0 18px rgba(90,150,220,0.5)" }}>CT</div>
+                    <div style={{ ...styles.reelCell, color: "#f0c07a", textShadow: "0 0 18px rgba(232,163,61,0.5)" }}>T</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {coinflip.status === "pending" && (
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 26 }}>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <button
+              className="nur-spin-btn"
+              disabled={!canSpin || spinning}
+              onClick={() => {
+                unlockCoinflipAudio();
+                onSpin();
+              }}
+              style={styles.spinBtn}
+            >
+              Крутить
+            </button>
+            {canSpin && !spinning && <div className="nur-spin-ring" />}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VetoBackground() {
+  const farRef = useRef(null);
+  const midRef = useRef(null);
+  const nearRef = useRef(null);
+
+  useEffect(() => {
+    const layers = [
+      { ref: farRef, depth: 40, scale: 1.0 },
+      { ref: midRef, depth: 90, scale: 1.03 },
+      { ref: nearRef, depth: 170, scale: 1.07 },
+    ];
+    const handleMove = (e) => {
+      const cx = (e.clientX / window.innerWidth - 0.5) * 2;
+      const cy = (e.clientY / window.innerHeight - 0.5) * 2;
+      layers.forEach(({ ref, depth, scale }) => {
+        if (ref.current) {
+          ref.current.style.transform = `rotate(-6deg) translate(${(-cx * depth).toFixed(1)}px, ${(-cy * depth).toFixed(1)}px) scale(${scale})`;
+        }
+      });
+    };
+    window.addEventListener("mousemove", handleMove);
+    return () => window.removeEventListener("mousemove", handleMove);
+  }, []);
+
+  const makeRows = (rows, reps) =>
+    Array.from({ length: rows }).map((_, r) => (
+      <div key={r} className="nur-veto-bg-row">
+        {Array.from({ length: reps }).map((_, i) => (
+          <span key={i}>
+            <span className="nur-veto-bg-nur">NUR</span>
+            <span className="nur-veto-bg-tour">TOURNAMENTS</span>
+          </span>
+        ))}
+      </div>
+    ));
+
+  return (
+    <>
+      <div ref={farRef} className="nur-veto-bg-layer nur-veto-bg-far">
+        {makeRows(9, 8)}
+      </div>
+      <div ref={midRef} className="nur-veto-bg-layer nur-veto-bg-mid">
+        {makeRows(6, 6)}
+      </div>
+      <div ref={nearRef} className="nur-veto-bg-layer nur-veto-bg-near">
+        {makeRows(4, 5)}
+      </div>
+    </>
+  );
+}
+
+function ModeToggle({ value, onChange }) {
+  const rowRef = useRef(null);
+
+  const burst = (btnEl) => {
+    const host = rowRef.current && rowRef.current.closest(".nur-mode-card");
+    const field = host && host.querySelector(".nur-mode-smoke-field");
+    if (!host || !field) return;
+    const hostRect = host.getBoundingClientRect();
+    const btnRect = btnEl.getBoundingClientRect();
+    const originX = btnRect.left - hostRect.left + btnRect.width / 2;
+    const originY = btnRect.top - hostRect.top + btnRect.height / 2;
+
+    const colors = [
+      "radial-gradient(circle, rgba(255,120,110,0.85), rgba(217,65,76,0.55) 45%, transparent 75%)",
+      "radial-gradient(circle, rgba(255,196,110,0.85), rgba(232,163,61,0.5) 45%, transparent 75%)",
+      "radial-gradient(circle, rgba(120,160,255,0.6), rgba(70,100,220,0.35) 45%, transparent 75%)",
+      "radial-gradient(circle, rgba(255,150,90,0.8), rgba(200,60,60,0.45) 45%, transparent 75%)",
+    ];
+
+    const count = 16;
+    for (let i = 0; i < count; i++) {
+      const puff = document.createElement("div");
+      puff.className = "nur-mode-puff2";
+      const size = 60 + Math.random() * 100;
+      const spreadX = (Math.random() - 0.5) * hostRect.width * 1.3;
+      const spreadY = -30 - Math.random() * 90;
+      const dur = 1.4 + Math.random() * 1.1;
+      const delay = Math.random() * 0.35;
+      puff.style.width = size + "px";
+      puff.style.height = size + "px";
+      puff.style.left = originX + "px";
+      puff.style.top = originY + "px";
+      puff.style.marginLeft = -(size / 2) + "px";
+      puff.style.marginTop = -(size / 2) + "px";
+      puff.style.background = colors[Math.floor(Math.random() * colors.length)];
+      puff.style.setProperty("--x1", spreadX + "px");
+      puff.style.setProperty("--y1", spreadY + "px");
+      puff.style.setProperty("--s1", (1.6 + Math.random() * 1.2).toFixed(2));
+      puff.style.setProperty("--peak", (0.6 + Math.random() * 0.3).toFixed(2));
+      puff.style.setProperty("--dur", dur + "s");
+      puff.style.setProperty("--delay", delay + "s");
+      field.appendChild(puff);
+      puff.addEventListener("animationend", () => puff.remove());
+    }
+  };
+
+  const handleClick = (m, e) => {
+    if (m !== value) onChange(m);
+    burst(e.currentTarget);
+  };
+
+  return (
+    <>
+      <div ref={rowRef} style={{ display: "flex", gap: 10 }}>
+        {["5x5", "2x2"].map((m) => (
+          <button
+            key={m}
+            className={`nur-mode-btn${value === m ? " active" : ""}`}
+            onClick={(e) => handleClick(m, e)}
+            style={{ ...styles.modeBtn, ...(value === m ? styles.modeBtnActive : {}), flex: 1, textAlign: "center" }}
+          >
+            {MODE_LABEL[m]}
+          </button>
+        ))}
+      </div>
+      <div className="nur-mode-smoke-field" />
+    </>
+  );
+}
+
+// Ссылки, упоминания каналов/чатов и т.п. — запрещены в никнейме
+const LINK_PATTERNS = [
+  /https?:\/\//i,
+  /\bwww\./i,
+  /t\.me\//i,
+  /telegram/i,
+  /vk\.com/i,
+  /discord/i,
+  /instagram/i,
+  /whatsapp/i,
+  /\.(com|ru|net|org|io|gg|co|me|su)\b/i,
+  /@/,
+];
+
+// Базовый список корней нецензурных слов — можно дополнять своими вариантами.
+// Сравнение идёт по очищенной от небуквенных символов строке, без учёта регистра.
+const PROFANITY_STEMS = [
+  "хуй", "хуе", "хуё", "хер", "пизд", "ебат", "ебал", "ебан", "ебл", "въеб",
+  "бляд", "блят", "сучар", "гандон", "мудак", "мудил", "пидор", "пидар", "залуп", "чмо",
+  "fuck", "shit", "bitch", "asshole", "cunt", "dick", "nigger", "faggot",
+];
+
+function containsBlockedLink(text) {
+  return LINK_PATTERNS.some((re) => re.test(text));
+}
+
+function containsProfanity(text) {
+  const normalized = text.toLowerCase().replace(/[^a-zа-яё0-9]/gi, "");
+  return PROFANITY_STEMS.some((stem) => normalized.includes(stem));
+}
+
+// Ловит заявления вида "я менеджер/владелец канала X", попытки выдать себя
+// за администрацию сайта или чьего-то Telegram-канала.
+const IMPERSONATION_PATTERNS = [
+  /менеджер/i,
+  /владел[ец|ица]/i,
+  /создател[ья]/i,
+  /founder/i,
+  /\bowner\b/i,
+  /\bmanager\b/i,
+  /админ(истратор)?\s*(канала|группы|чата|сайта)/i,
+  /(канала|группы|чата|сайта)\s*(nur|нур)/i,
+];
+
+function containsImpersonationClaim(text) {
+  return IMPERSONATION_PATTERNS.some((re) => re.test(text));
+}
+
+function validateUsername(raw) {
+  const name = raw.trim();
+  if (name.length < 3) return "Никнейм — минимум 3 символа.";
+  if (containsBlockedLink(name)) return "Никнейм не может содержать ссылки или упоминания каналов/сайтов.";
+  if (containsProfanity(name)) return "Никнейм содержит недопустимые слова. Выберите другой.";
+  return null;
+}
+
+function shuffleArr(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function nextPow2(n) {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+
+function roundLabel(totalRounds, r) {
+  const remaining = totalRounds - r;
+  if (remaining === 1) return "ФИНАЛ";
+  if (remaining === 2) return "ПОЛУФИНАЛ";
+  if (remaining === 3) return "ЧЕТВЕРТЬФИНАЛ";
+  return `РАУНД ${r + 1}`;
+}
+
+function computeGeometry(rounds) {
+  const m0 = rounds[0].length;
+  const containerHeight = m0 * SLOT0;
+  const centerY = (r, i) => {
+    const slot = SLOT0 * Math.pow(2, r);
+    return i * slot + slot / 2;
+  };
+  const connectors = [];
+  for (let r = 1; r < rounds.length; r++) {
+    rounds[r].forEach((m, j) => {
+      const y1 = centerY(r - 1, j * 2);
+      const y2 = centerY(r - 1, j * 2 + 1);
+      const yMid = centerY(r, j);
+      const xLeft = r * (CARD_W + ROUND_GAP) - ROUND_GAP;
+      const xMid = xLeft + ROUND_GAP / 2;
+      connectors.push({ key: `${r}-${j}`, xLeft, xMid, y1, y2, yMid });
+    });
+  }
+  return { containerHeight, centerY, connectors, width: rounds.length * (CARD_W + ROUND_GAP) };
+}
+
+function teamLabel(team) {
+  if (!team) return null;
+  return team.tag ? `[${team.tag}] ${team.name}` : team.name;
+}
+
+function formatDateTime(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return `${day} в ${time}`;
+}
+
+function FileChooser({ id, accept = "image/*", onChange, disabled, uploadingLabel, label = "Выбрать файл" }) {
+  const inputRef = useRef(null);
+  const [fileName, setFileName] = useState("");
+  const handleChange = (e) => {
+    const f = e.target.files?.[0];
+    setFileName(f ? f.name : "");
+    onChange?.(e);
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <input ref={inputRef} id={id} type="file" accept={accept} disabled={disabled} onChange={handleChange} style={{ display: "none" }} />
+      <button
+        type="button"
+        className="nur-btn"
+        style={{ ...styles.ghostBtnSm, opacity: disabled ? 0.6 : 1, cursor: disabled ? "default" : "pointer" }}
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+      >
+        {disabled && uploadingLabel ? uploadingLabel : label}
+      </button>
+      <span style={{ ...styles.hint, fontSize: 11.5 }}>{fileName || "Файл не выбран"}</span>
+    </div>
+  );
+}
+
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const [activeTab, setActiveTab] = useState("tournaments");
+  const [createTeamMode, setCreateTeamMode] = useState("5x5");
+  const [leaderboardMode, setLeaderboardMode] = useState("5x5");
+
+  const [teams, setTeams] = useState([]);
+  const [tournaments, setTournaments] = useState([]);
+  const [allMatches, setAllMatches] = useState([]);
+  const [ads, setAds] = useState([]);
+  const [adUploading, setAdUploading] = useState({});
+  const [adLinkDrafts, setAdLinkDrafts] = useState({});
+  const [adExpiryDrafts, setAdExpiryDrafts] = useState({});
+  const [mapImages, setMapImages] = useState({});
+  const [banningMapKey, setBanningMapKey] = useState(null);
+  const [matchCoinflips, setMatchCoinflips] = useState([]);
+  const [mapImageUploading, setMapImageUploading] = useState({});
+
+  const [authScreen, setAuthScreen] = useState("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+
+  const [showCreateTeam, setShowCreateTeam] = useState(false);
+  const [teamName, setTeamName] = useState("");
+  const [teamTag, setTeamTag] = useState("");
+  const [confirmDeleteTeamId, setConfirmDeleteTeamId] = useState(null);
+  const [addMemberQuery, setAddMemberQuery] = useState({});
+  const [addMemberResults, setAddMemberResults] = useState({});
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [friends, setFriends] = useState([]);
+  const friendsRef = useRef([]);
+  useEffect(() => {
+    friendsRef.current = friends;
+  }, [friends]);
+  const [teamInvites, setTeamInvites] = useState([]);
+  const [incomingRequests, setIncomingRequests] = useState([]);
+  const [sentPendingIds, setSentPendingIds] = useState([]);
+  const [sentPendingRequests, setSentPendingRequests] = useState([]);
+  const [friendQuery, setFriendQuery] = useState("");
+  const [friendResults, setFriendResults] = useState([]);
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const navAreaRef = useRef(null);
+
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (navAreaRef.current && !navAreaRef.current.contains(e.target)) {
+        setNavMenuOpen(false);
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const [viewingUser, setViewingUser] = useState(null);
+  const [viewingUserFriends, setViewingUserFriends] = useState([]);
+  const [viewingUserFriendsLoading, setViewingUserFriendsLoading] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const [bioDraft, setBioDraft] = useState("");
+  const [typeSoundOn, setTypeSoundOn] = useState(() => {
+    try {
+      return localStorage.getItem("nur-type-sound") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const [soundPresetId, setSoundPresetId] = useState(() => {
+    try {
+      return localStorage.getItem("nur-type-sound-preset") || "keyboard-click";
+    } catch {
+      return "soft-click";
+    }
+  });
+  const [soundVolume, setSoundVolume] = useState(() => {
+    try {
+      const v = parseFloat(localStorage.getItem("nur-type-sound-volume"));
+      return Number.isFinite(v) ? v : 0.5;
+    } catch {
+      return 0.5;
+    }
+  });
+  const [skipBackspaceSound, setSkipBackspaceSound] = useState(() => {
+    try {
+      return localStorage.getItem("nur-skip-backspace-sound") === "on";
+    } catch {
+      return false;
+    }
+  });
+  const [skipSpaceSound, setSkipSpaceSound] = useState(() => {
+    try {
+      return localStorage.getItem("nur-skip-space-sound") === "on";
+    } catch {
+      return false;
+    }
+  });
+  const SOUND_PRESETS = [
+    { id: "keyboard-click", name: "Клавиатура", src: sndKeyboardClick },
+    { id: "modern-click", name: "Современный клик", src: sndModernClick },
+    { id: "hard-typewriter", name: "Машинка (жёсткий)", src: sndHardTypewriter },
+    { id: "soft-typewriter", name: "Машинка (мягкий)", src: sndSoftTypewriter },
+    { id: "bubble-click", name: "Пузырёк", src: sndBubbleClick },
+    { id: "mouse-click", name: "Клик мышкой", src: sndMouseClick },
+  ];
+
+  const playPresetSound = (presetId) => {
+    const preset = SOUND_PRESETS.find((p) => p.id === presetId) || SOUND_PRESETS[0];
+    try {
+      const audio = new Audio(preset.src);
+      audio.volume = soundVolume;
+      audio.play().catch(() => {});
+    } catch {
+      /* ignore audio errors */
+    }
+  };
+
+  const playTypeSound = (e) => {
+    if (!typeSoundOn) return;
+    const key = e?.key;
+    if (skipBackspaceSound && (key === "Backspace" || key === "Delete")) return;
+    if (skipSpaceSound && key === " ") return;
+    playPresetSound(soundPresetId);
+  };
+
+  const selectSoundPreset = (presetId) => {
+    setSoundPresetId(presetId);
+    try {
+      localStorage.setItem("nur-type-sound-preset", presetId);
+    } catch {
+      /* ignore storage errors */
+    }
+    playPresetSound(presetId);
+  };
+
+  const changeSoundVolume = (val) => {
+    setSoundVolume(val);
+    try {
+      localStorage.setItem("nur-type-sound-volume", String(val));
+    } catch {
+      /* ignore storage errors */
+    }
+  };
+
+  const toggleSkipBackspaceSound = () => {
+    setSkipBackspaceSound((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("nur-skip-backspace-sound", next ? "on" : "off");
+      } catch {
+        /* ignore storage errors */
+      }
+      return next;
+    });
+  };
+
+  const toggleSkipSpaceSound = () => {
+    setSkipSpaceSound((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("nur-skip-space-sound", next ? "on" : "off");
+      } catch {
+        /* ignore storage errors */
+      }
+      return next;
+    });
+  };
+
+  const toggleTypeSound = () => {
+    setTypeSoundOn((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("nur-type-sound", next ? "on" : "off");
+      } catch {
+        /* ignore storage errors */
+      }
+      return next;
+    });
+  };
+  const [bioSaving, setBioSaving] = useState(false);
+  const [soundsCardOpen, setSoundsCardOpen] = useState(false);
+  const [activeChatFriend, setActiveChatFriend] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const chatMessagesRef = useRef(null);
+  useEffect(() => {
+    if (chatMessagesRef.current) chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
+  }, [chatMessages]);
+  const [chatInput, setChatInput] = useState("");
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const [toasts, setToasts] = useState([]);
+  const [readyChecks, setReadyChecks] = useState([]);
+  const [readyCheckNow, setReadyCheckNow] = useState(Date.now());
+  const [matchVetoes, setMatchVetoes] = useState([]);
+
+  const showToast = (text, sender) => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts((prev) => [...prev, { id, text, sender }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 6000);
+  };
+  const [onlineUserIds, setOnlineUserIds] = useState(new Set());
+  const [staffProfiles, setStaffProfiles] = useState([]);
+  const [supportPanelOpen, setSupportPanelOpen] = useState(false);
+  const [supportTarget, setSupportTarget] = useState(null);
+  const [supportMessages, setSupportMessages] = useState([]);
+  const supportMessagesRef = useRef(null);
+  useEffect(() => {
+    if (supportMessagesRef.current) supportMessagesRef.current.scrollTop = supportMessagesRef.current.scrollHeight;
+  }, [supportMessages]);
+  const [supportInput, setSupportInput] = useState("");
+  const [supportTickets, setSupportTickets] = useState([]);
+  const [supportArchive, setSupportArchive] = useState([]);
+  const [supportTicketId, setSupportTicketId] = useState(null);
+  const [supportTicketStatus, setSupportTicketStatus] = useState(null);
+  const [supportPageTab, setSupportPageTab] = useState("active");
+  const [confirmCloseTicket, setConfirmCloseTicket] = useState(false);
+  const [confirmDeleteTicketId, setConfirmDeleteTicketId] = useState(null);
+  const [supportUnread, setSupportUnread] = useState(0);
+  const [supportView, setSupportView] = useState("chat");
+  const supportTargetRef = useRef(null);
+  useEffect(() => {
+    supportTargetRef.current = supportTarget;
+  }, [supportTarget]);
+  const supportTicketIdRef = useRef(null);
+  useEffect(() => {
+    supportTicketIdRef.current = supportTicketId;
+  }, [supportTicketId]);
+  const supportTicketStatusRef = useRef(null);
+  useEffect(() => {
+    supportTicketStatusRef.current = supportTicketStatus;
+  }, [supportTicketStatus]);
+  const activeChatFriendRef = useRef(null);
+  useEffect(() => {
+    activeChatFriendRef.current = activeChatFriend;
+  }, [activeChatFriend]);
+  const profileRef = useRef(null);
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+  const supportPanelOpenRef = useRef(false);
+  useEffect(() => {
+    supportPanelOpenRef.current = supportPanelOpen;
+  }, [supportPanelOpen]);
+  const supportViewRef = useRef("chat");
+  useEffect(() => {
+    supportViewRef.current = supportView;
+  }, [supportView]);
+
+  const [chatDrag, setChatDrag] = useState({ x: 0, y: 0 });
+  const chatDragState = useRef({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0 });
+
+  const onChatDragMove = (e) => {
+    if (!chatDragState.current.dragging) return;
+    const dx = e.clientX - chatDragState.current.startX;
+    const dy = e.clientY - chatDragState.current.startY;
+    setChatDrag({ x: chatDragState.current.origX + dx, y: chatDragState.current.origY + dy });
+  };
+
+  const onChatDragUp = () => {
+    chatDragState.current.dragging = false;
+    window.removeEventListener("mousemove", onChatDragMove);
+    window.removeEventListener("mouseup", onChatDragUp);
+  };
+
+  const onChatHeaderMouseDown = (e) => {
+    chatDragState.current = {
+      dragging: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: chatDrag.x,
+      origY: chatDrag.y,
+    };
+    window.addEventListener("mousemove", onChatDragMove);
+    window.addEventListener("mouseup", onChatDragUp);
+  };
+
+  const [supportDrag, setSupportDrag] = useState({ x: 0, y: 0 });
+  const supportDragState = useRef({ dragging: false, startX: 0, startY: 0, origX: 0, origY: 0 });
+
+  const onSupportDragMove = (e) => {
+    if (!supportDragState.current.dragging) return;
+    const dx = e.clientX - supportDragState.current.startX;
+    const dy = e.clientY - supportDragState.current.startY;
+    setSupportDrag({ x: supportDragState.current.origX + dx, y: supportDragState.current.origY + dy });
+  };
+
+  const onSupportDragUp = () => {
+    supportDragState.current.dragging = false;
+    window.removeEventListener("mousemove", onSupportDragMove);
+    window.removeEventListener("mouseup", onSupportDragUp);
+  };
+
+  const onSupportHeaderMouseDown = (e) => {
+    supportDragState.current = {
+      dragging: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: supportDrag.x,
+      origY: supportDrag.y,
+    };
+    window.addEventListener("mousemove", onSupportDragMove);
+    window.addEventListener("mouseup", onSupportDragUp);
+  };
+
+  const [newTourName, setNewTourName] = useState("");
+  const [newTourMode, setNewTourMode] = useState("5x5");
+  const [newTourPrize, setNewTourPrize] = useState("");
+  const [newTourMaxTeams, setNewTourMaxTeams] = useState("");
+  const [newTourBannerFile, setNewTourBannerFile] = useState(null);
+  const [newTourAnnounceAt, setNewTourAnnounceAt] = useState("");
+  const [newTourRegOpenAt, setNewTourRegOpenAt] = useState("");
+  const [newTourStartAt, setNewTourStartAt] = useState("");
+  const [tourCreating, setTourCreating] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [regSelections, setRegSelections] = useState({});
+
+  const [expandedTour, setExpandedTour] = useState(null);
+  const [showTeamsTour, setShowTeamsTour] = useState(null);
+  const [expandedTeamId, setExpandedTeamId] = useState(null);
+  const [expandedRounds, setExpandedRounds] = useState(null);
+
+  useEffect(() => {
+    setExpandedTour(null);
+    setExpandedRounds(null);
+  }, [activeTab]);
+
+  const refreshTeams = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("teams")
+      .select("id, mode, name, tag, owner_id, max_size, team_members(member_name)")
+      .order("created_at");
+    if (error) return setErrorMsg(error.message);
+    setTeams(data || []);
+  }, []);
+
+  const refreshTournaments = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("tournaments")
+      .select(
+        "id, mode, name, status, banner_url, prize_pool, max_teams, announce_at, reg_open_at, start_at, created_at, tournament_teams(team_id)"
+      )
+      .order("created_at");
+    if (error) return setErrorMsg(error.message);
+    setTournaments(data || []);
+  }, []);
+
+  const refreshAllMatches = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("tournament_id, round, winner_id, team1_id, team2_id")
+      .not("winner_id", "is", null);
+    if (error) return setErrorMsg(error.message);
+    setAllMatches(data || []);
+  }, []);
+
+  const refreshReadyChecks = useCallback(async () => {
+    const { data, error } = await supabase.from("match_ready_checks").select("*").eq("status", "pending");
+    if (error) return;
+    setReadyChecks(data || []);
+  }, []);
+
+  const refreshMatchVetoes = useCallback(async () => {
+    const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("match_vetoes")
+      .select("*")
+      .or(`status.eq.in_progress,and(status.eq.completed,created_at.gte.${recentCutoff})`);
+    if (error) return;
+    setMatchVetoes(data || []);
+  }, []);
+
+  const refreshMatchCoinflips = useCallback(async () => {
+    const recentCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("match_coinflips")
+      .select("*")
+      .or(`status.eq.pending,and(status.eq.completed,created_at.gte.${recentCutoff})`);
+    if (error) return;
+    setMatchCoinflips(data || []);
+  }, []);
+
+  const refreshMapImages = useCallback(async () => {
+    const { data, error } = await supabase.from("map_images").select("map_key, image_url");
+    if (error) return;
+    const map = {};
+    (data || []).forEach((row) => {
+      if (row.image_url) map[row.map_key] = row.image_url;
+    });
+    setMapImages(map);
+  }, []);
+
+  const refreshStaffProfiles = useCallback(async () => {
+    const { data, error } = await supabase.from("profiles").select("id, username, avatar_url").or("is_admin.eq.true,is_moderator.eq.true");
+    if (error) return;
+    setStaffProfiles(data || []);
+  }, []);
+
+  const refreshSupportTickets = useCallback(async () => {
+    const { data: tickets, error } = await supabase
+      .from("support_tickets")
+      .select("id, user_id, created_at")
+      .eq("status", "open")
+      .order("created_at", { ascending: false });
+    if (error) return;
+    if (!tickets || !tickets.length) return setSupportTickets([]);
+    const ticketIds = tickets.map((t) => t.id);
+    const userIds = [...new Set(tickets.map((t) => t.user_id))];
+    const [{ data: profs }, { data: msgs }] = await Promise.all([
+      supabase.from("profiles").select("id, username, avatar_url").in("id", userIds),
+      supabase.from("support_messages").select("ticket_id, created_at").in("ticket_id", ticketIds).order("created_at", { ascending: false }),
+    ]);
+    const lastByTicket = new Map();
+    (msgs || []).forEach((m) => {
+      if (!lastByTicket.has(m.ticket_id)) lastByTicket.set(m.ticket_id, m.created_at);
+    });
+    const list = tickets
+      .map((t) => {
+        const p = (profs || []).find((pr) => pr.id === t.user_id);
+        return p
+          ? { ticket_id: t.id, user_id: t.user_id, username: p.username, avatar_url: p.avatar_url, last_at: lastByTicket.get(t.id) || t.created_at }
+          : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.last_at) - new Date(a.last_at));
+    setSupportTickets(list);
+  }, []);
+
+  const refreshSupportArchive = useCallback(async () => {
+    const { data: tickets, error } = await supabase
+      .from("support_tickets")
+      .select("id, user_id, closed_at")
+      .eq("status", "closed")
+      .order("closed_at", { ascending: false });
+    if (error) return;
+    if (!tickets || !tickets.length) return setSupportArchive([]);
+    const userIds = [...new Set(tickets.map((t) => t.user_id))];
+    const { data: profs } = await supabase.from("profiles").select("id, username, avatar_url").in("id", userIds);
+    const list = tickets.map((t) => {
+      const p = (profs || []).find((pr) => pr.id === t.user_id);
+      return { ticket_id: t.id, user_id: t.user_id, username: p?.username || "?", avatar_url: p?.avatar_url, closed_at: t.closed_at };
+    });
+    setSupportArchive(list);
+  }, []);
+
+  const refreshAds = useCallback(async () => {
+    const { data, error } = await supabase.from("sponsors").select("id, slot, image_url, link_url, is_active, expires_at").order("slot");
+    if (error) return;
+    setAds(data || []);
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("nur-ads-public")
+      .on("postgres_changes", { event: "*", schema: "public", table: "sponsors" }, () => refreshAds())
+      .on("postgres_changes", { event: "*", schema: "public", table: "tournaments" }, () => refreshTournaments())
+      .on("postgres_changes", { event: "*", schema: "public", table: "tournament_teams" }, () => refreshTournaments())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [refreshAds, refreshTournaments]);
+
+  const refreshFriends = useCallback(async (userId) => {
+    if (!userId) {
+      setFriends([]);
+      setIncomingRequests([]);
+      setSentPendingIds([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("friend_requests")
+      .select(
+        "id, status, sender_id, receiver_id, sender:profiles!friend_requests_sender_id_fkey(id, username, avatar_url, banner_url, bio), receiver:profiles!friend_requests_receiver_id_fkey(id, username, avatar_url, banner_url, bio)"
+      )
+      .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`);
+    if (error) return;
+    const rows = data || [];
+    const accepted = rows
+      .filter((r) => r.status === "accepted")
+      .map((r) => ({ requestId: r.id, ...(r.sender_id === userId ? r.receiver : r.sender) }));
+    const incoming = rows.filter((r) => r.status === "pending" && r.receiver_id === userId).map((r) => ({ requestId: r.id, ...r.sender }));
+    const sentPending = rows
+      .filter((r) => r.status === "pending" && r.sender_id === userId)
+      .map((r) => ({ requestId: r.id, ...r.receiver }));
+    setFriends(accepted);
+    setIncomingRequests(incoming);
+    setSentPendingRequests(sentPending);
+    setSentPendingIds(sentPending.map((r) => r.id));
+  }, []);
+
+  const refreshTeamInvites = useCallback(async (userId) => {
+    if (!userId) {
+      setTeamInvites([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("team_invites")
+      .select("id, status, team:teams!team_invites_team_id_fkey(id, name, tag, mode)")
+      .eq("invited_id", userId)
+      .eq("status", "pending");
+    if (error) return;
+    setTeamInvites(data || []);
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setChatMessages([]);
+      setActiveChatFriend(null);
+      setUnreadCounts({});
+      return;
+    }
+    const channel = supabase
+      .channel(`nur-realtime-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "friend_requests", filter: `receiver_id=eq.${session.user.id}` },
+        () => refreshFriends(session.user.id)
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "friend_requests", filter: `sender_id=eq.${session.user.id}` },
+        () => refreshFriends(session.user.id)
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "team_invites", filter: `invited_id=eq.${session.user.id}` },
+        () => refreshTeamInvites(session.user.id)
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages", filter: `receiver_id=eq.${session.user.id}` },
+        (payload) => {
+          const msg = payload.new;
+          if (activeChatFriendRef.current && activeChatFriendRef.current.id === msg.sender_id) {
+            setChatMessages((prev) => [...prev, msg]);
+          } else {
+            setUnreadCounts((prev) => ({ ...prev, [msg.sender_id]: (prev[msg.sender_id] || 0) + 1 }));
+            const sender = friendsRef.current.find((f) => f.id === msg.sender_id);
+            showToast(`Новое сообщение от ${sender?.username || "друга"}`, sender);
+          }
+        }
+      )
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "support_messages" }, (payload) => {
+        const msg = payload.new;
+        if (msg.sender_id === session.user.id) return;
+        const isStaff = profileRef.current?.is_admin || profileRef.current?.is_moderator;
+        const viewingThisTicket = supportTicketStatusRef.current === "open" && supportTicketIdRef.current && msg.ticket_id === supportTicketIdRef.current;
+        if (viewingThisTicket) {
+          setSupportMessages((prev) => [...prev, msg]);
+        } else if (!isStaff && msg.user_id === session.user.id) {
+          setSupportUnread((prev) => prev + 1);
+        } else if (isStaff) {
+          setSupportUnread((prev) => prev + 1);
+        }
+        if (isStaff) refreshSupportTickets();
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "support_tickets" }, (payload) => {
+        const ticket = payload.new;
+        const isStaff = profileRef.current?.is_admin || profileRef.current?.is_moderator;
+        if (ticket.status === "closed" && supportTicketIdRef.current === ticket.id) {
+          setSupportMessages([]);
+          setSupportTarget(null);
+          setSupportTicketId(null);
+          setSupportTicketStatus(null);
+          setConfirmCloseTicket(false);
+        }
+        if (isStaff) {
+          refreshSupportTickets();
+          refreshSupportArchive();
+        }
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "match_ready_checks" }, () => {
+        refreshReadyChecks();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "match_vetoes" }, () => {
+        refreshMatchVetoes();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "match_coinflips" }, () => {
+        refreshMatchCoinflips();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "map_images" }, () => {
+        refreshMapImages();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session, refreshFriends, refreshTeamInvites, refreshSupportTickets, refreshSupportArchive, refreshReadyChecks, refreshMatchVetoes, refreshMatchCoinflips, refreshMapImages]);
+
+  useEffect(() => {
+    if (!session) {
+      setOnlineUserIds(new Set());
+      return;
+    }
+    const presenceChannel = supabase.channel("nur-online-users", {
+      config: { presence: { key: session.user.id } },
+    });
+    presenceChannel
+      .on("presence", { event: "sync" }, () => {
+        const state = presenceChannel.presenceState();
+        setOnlineUserIds(new Set(Object.keys(state)));
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await presenceChannel.track({ online_at: new Date().toISOString() });
+        }
+      });
+    return () => {
+      supabase.removeChannel(presenceChannel);
+    };
+  }, [session]);
+
+  const openChat = async (friend) => {
+    setActiveChatFriend(friend);
+    setUnreadCounts((prev) => ({ ...prev, [friend.id]: 0 }));
+    setNavMenuOpen(false);
+    setNotifOpen(false);
+    setChatDrag({ x: 0, y: 0 });
+    const { data, error } = await supabase
+      .from("messages")
+      .select("id, sender_id, receiver_id, content, created_at")
+      .or(`and(sender_id.eq.${session.user.id},receiver_id.eq.${friend.id}),and(sender_id.eq.${friend.id},receiver_id.eq.${session.user.id})`)
+      .order("created_at");
+    if (error) return setErrorMsg(error.message);
+    setChatMessages(data || []);
+  };
+
+  const sendChatMessage = async () => {
+    const text = chatInput.trim();
+    if (!text || !activeChatFriend || !session) return;
+    setChatInput("");
+    const { data, error } = await supabase
+      .from("messages")
+      .insert({ sender_id: session.user.id, receiver_id: activeChatFriend.id, content: text })
+      .select()
+      .single();
+    if (error) return setErrorMsg(error.message);
+    setChatMessages((prev) => [...prev, data]);
+  };
+
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+    refreshTeams();
+    refreshTournaments();
+    refreshAllMatches();
+    refreshReadyChecks();
+    refreshMatchVetoes();
+    refreshMatchCoinflips();
+    refreshMapImages();
+    refreshAds();
+    refreshStaffProfiles();
+    return () => sub.subscription.unsubscribe();
+  }, [
+    refreshTeams,
+    refreshTournaments,
+    refreshAllMatches,
+    refreshReadyChecks,
+    refreshMatchVetoes,
+    refreshMatchCoinflips,
+    refreshMapImages,
+    refreshAds,
+    refreshStaffProfiles,
+  ]);
+
+  useEffect(() => {
+    if (!session) {
+      setProfile(null);
+      setFriends([]);
+      return;
+    }
+    supabase
+      .from("profiles")
+      .select("username, is_admin, is_moderator, avatar_url, banner_url, bio, is_closed")
+      .eq("id", session.user.id)
+      .single()
+      .then(({ data, error }) => {
+        if (error) return setErrorMsg(error.message);
+        setProfile(data);
+        setBioDraft(data?.bio || "");
+        if (data?.is_admin || data?.is_moderator) {
+          refreshSupportTickets();
+          refreshSupportArchive();
+        }
+      });
+    refreshFriends(session.user.id);
+    refreshTeamInvites(session.user.id);
+  }, [session, refreshFriends, refreshTeamInvites, refreshSupportTickets, refreshSupportArchive]);
+
+  const doRegister = async () => {
+    setErrorMsg("");
+    const usernameError = validateUsername(username);
+    if (usernameError) return setErrorMsg(usernameError);
+    if (password.length < 6) return setErrorMsg("Пароль — минимум 6 символов.");
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { data: { username: username.trim() } },
+    });
+    if (error) return setErrorMsg(error.message);
+    if (!data.session) {
+      setErrorMsg(
+        "Проверьте почту для подтверждения регистрации (или отключите 'Confirm email' в настройках Supabase Auth для теста)."
+      );
+    }
+  };
+
+  const doLogin = async () => {
+    setErrorMsg("");
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) setErrorMsg(error.message);
+  };
+
+  const doLogout = async () => {
+    await supabase.auth.signOut();
+    setActiveTab("tournaments");
+  };
+
+  const uploadAvatar = async (file) => {
+    if (!session || !file) return;
+    setAvatarUploading(true);
+    const ext = file.name.split(".").pop();
+    const path = `${session.user.id}/avatar.${ext}`;
+    const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+    if (upErr) {
+      setAvatarUploading(false);
+      return setErrorMsg("Не удалось загрузить аватар: " + upErr.message);
+    }
+    const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+    const avatarUrl = `${pub.publicUrl}?t=${Date.now()}`;
+    const { error } = await supabase.from("profiles").update({ avatar_url: avatarUrl }).eq("id", session.user.id);
+    setAvatarUploading(false);
+    if (error) return setErrorMsg(error.message);
+    setProfile((prev) => ({ ...prev, avatar_url: avatarUrl }));
+  };
+
+  const uploadBanner = async (file) => {
+    if (!session || !file) return;
+    setBannerUploading(true);
+    const ext = file.name.split(".").pop();
+    const path = `${session.user.id}/cover.${ext}`;
+    const { error: upErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+    if (upErr) {
+      setBannerUploading(false);
+      return setErrorMsg("Не удалось загрузить баннер: " + upErr.message);
+    }
+    const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+    const bannerUrl = `${pub.publicUrl}?t=${Date.now()}`;
+    const { error } = await supabase.from("profiles").update({ banner_url: bannerUrl }).eq("id", session.user.id);
+    setBannerUploading(false);
+    if (error) return setErrorMsg(error.message);
+    setProfile((prev) => ({ ...prev, banner_url: bannerUrl }));
+  };
+
+  const fetchUserFriends = async (userId) => {
+    const { data, error } = await supabase
+      .from("friend_requests")
+      .select(
+        "sender_id, receiver_id, sender:profiles!friend_requests_sender_id_fkey(id, username, avatar_url, banner_url, bio), receiver:profiles!friend_requests_receiver_id_fkey(id, username, avatar_url, banner_url, bio)"
+      )
+      .eq("status", "accepted")
+      .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`);
+    if (error) return [];
+    return (data || []).map((r) => (r.sender_id === userId ? r.receiver : r.sender));
+  };
+
+  const saveBio = async () => {
+    if (!session) return;
+    const text = bioDraft.trim();
+    if (containsBlockedLink(text)) {
+      return setErrorMsg("В описании нельзя оставлять ссылки или упоминания каналов/сайтов.");
+    }
+    if (containsProfanity(text)) {
+      return setErrorMsg("Описание содержит недопустимые слова.");
+    }
+    if (containsImpersonationClaim(text)) {
+      return setErrorMsg("В описании нельзя заявлять о владении/администрировании каналом, группой или сайтом.");
+    }
+    setBioSaving(true);
+    const { error } = await supabase.from("profiles").update({ bio: text }).eq("id", session.user.id);
+    setBioSaving(false);
+    if (error) return setErrorMsg(error.message);
+    setProfile((prev) => ({ ...prev, bio: text }));
+  };
+
+  const openUserProfile = async (user) => {
+    if (!user) return;
+    setViewingUser(user);
+    setViewingUserFriendsLoading(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    const { data: fullProfile } = await supabase
+      .from("profiles")
+      .select("id, username, avatar_url, banner_url, bio, is_moderator, is_closed")
+      .eq("id", user.id)
+      .single();
+    if (fullProfile) setViewingUser(fullProfile);
+    const list = await fetchUserFriends(user.id);
+    setViewingUserFriends(list);
+    setViewingUserFriendsLoading(false);
+  };
+
+  const toggleModerator = async (targetUser) => {
+    const { error } = await supabase.from("profiles").update({ is_moderator: !targetUser.is_moderator }).eq("id", targetUser.id);
+    if (error) return setErrorMsg(error.message);
+    setViewingUser((prev) => (prev ? { ...prev, is_moderator: !targetUser.is_moderator } : prev));
+  };
+
+  const toggleClosedProfile = async (targetUser) => {
+    const nextVal = !targetUser.is_closed;
+    const { error } = await supabase.from("profiles").update({ is_closed: nextVal }).eq("id", targetUser.id);
+    if (error) return setErrorMsg(error.message);
+    if (session && targetUser.id === session.user.id) setProfile((prev) => (prev ? { ...prev, is_closed: nextVal } : prev));
+    setViewingUser((prev) => (prev ? { ...prev, is_closed: nextVal } : prev));
+  };
+
+
+  const openSupportList = async () => {
+    setSupportTarget(null);
+    setSupportTicketId(null);
+    setSupportTicketStatus(null);
+    setConfirmCloseTicket(false);
+    setSupportView("list");
+    setSupportPanelOpen(true);
+    setSupportDrag({ x: 0, y: 0 });
+    setSupportUnread(0);
+    refreshSupportTickets();
+  };
+
+  const ensureOpenTicket = async (userId) => {
+    const { data: existing, error: selErr } = await supabase
+      .from("support_tickets")
+      .select("id, status")
+      .eq("user_id", userId)
+      .eq("status", "open")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (selErr) throw selErr;
+    if (existing) return existing.id;
+    const { data: created, error: insErr } = await supabase.from("support_tickets").insert({ user_id: userId }).select("id").single();
+    if (insErr) throw insErr;
+    return created.id;
+  };
+
+  const openSupportChat = async (target) => {
+    if (!supportPanelOpen) setSupportDrag({ x: 0, y: 0 });
+    const targetUserId = target ? target.user_id || target.id : session.user.id;
+    setSupportTarget(target ? { id: targetUserId, username: target.username } : null);
+    setSupportView("chat");
+    setSupportPanelOpen(true);
+    setSupportUnread(0);
+    setConfirmCloseTicket(false);
+    try {
+      const ticketId = target && target.ticket_id ? target.ticket_id : await ensureOpenTicket(targetUserId);
+      setSupportTicketId(ticketId);
+      setSupportTicketStatus("open");
+      const { data, error } = await supabase
+        .from("support_messages")
+        .select("id, user_id, sender_id, content, created_at, ticket_id")
+        .eq("ticket_id", ticketId)
+        .order("created_at");
+      if (error) return setErrorMsg(error.message);
+      setSupportMessages(data || []);
+    } catch (e) {
+      setErrorMsg(e.message || "Не удалось открыть чат поддержки.");
+    }
+  };
+
+  const openArchiveChat = async (ticket) => {
+    setSupportTarget({ id: ticket.user_id, username: ticket.username });
+    setSupportTicketId(ticket.ticket_id);
+    setSupportTicketStatus("closed");
+    setConfirmCloseTicket(false);
+    const { data, error } = await supabase
+      .from("support_messages")
+      .select("id, user_id, sender_id, content, created_at, ticket_id")
+      .eq("ticket_id", ticket.ticket_id)
+      .order("created_at");
+    if (error) return setErrorMsg(error.message);
+    setSupportMessages(data || []);
+  };
+
+  const closeSupportTicket = async () => {
+    if (!session || !supportTicketId || supportTicketStatus !== "open") return;
+    const { error } = await supabase
+      .from("support_tickets")
+      .update({ status: "closed", closed_at: new Date().toISOString(), closed_by: session.user.id })
+      .eq("id", supportTicketId);
+    if (error) return setErrorMsg(error.message);
+    setSupportMessages([]);
+    setSupportTarget(null);
+    setSupportTicketId(null);
+    setSupportTicketStatus(null);
+    setConfirmCloseTicket(false);
+    if (profile?.is_admin || profile?.is_moderator) {
+      refreshSupportTickets();
+      refreshSupportArchive();
+    }
+  };
+
+  const deleteArchivedTicket = async (ticketId) => {
+    if (!profile?.is_admin) return;
+    const { error } = await supabase.from("support_tickets").delete().eq("id", ticketId);
+    if (error) return setErrorMsg(error.message);
+    setConfirmDeleteTicketId(null);
+    setSupportArchive((prev) => prev.filter((t) => t.ticket_id !== ticketId));
+    if (supportTicketId === ticketId) {
+      setSupportMessages([]);
+      setSupportTarget(null);
+      setSupportTicketId(null);
+      setSupportTicketStatus(null);
+    }
+  };
+
+  const sendSupportMessage = async () => {
+    const text = supportInput.trim();
+    if (!text || !session || !supportTicketId || supportTicketStatus !== "open") return;
+    const targetUserId = supportTarget ? supportTarget.id : session.user.id;
+    setSupportInput("");
+    const { data, error } = await supabase
+      .from("support_messages")
+      .insert({ ticket_id: supportTicketId, user_id: targetUserId, sender_id: session.user.id, content: text })
+      .select()
+      .single();
+    if (error) return setErrorMsg(error.message);
+    setSupportMessages((prev) => [...prev, data]);
+  };
+
+
+
+  const getUserTournamentHistory = (uname) => {
+    const userTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === uname)).map((t) => t.id);
+    if (userTeamIds.length === 0) return [];
+    return tournaments
+      .filter((t) => (t.tournament_teams || []).some((tt) => userTeamIds.includes(tt.team_id)))
+      .map((t) => {
+        const matchesForTour = allMatches.filter((m) => m.tournament_id === t.id);
+        const maxRound = matchesForTour.reduce((mx, m) => Math.max(mx, m.round), 0);
+        const finalMatch = matchesForTour.find((m) => m.round === maxRound && m.team1_id && m.team2_id);
+        const isChampion = !!(finalMatch && userTeamIds.includes(finalMatch.winner_id));
+        return { id: t.id, name: t.name, mode: t.mode, isChampion };
+      })
+      .sort((a, b) => (a.isChampion === b.isChampion ? 0 : a.isChampion ? -1 : 1));
+  };
+
+  const getUserMatchHistory = (uname) => {
+    const userTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === uname)).map((t) => t.id);
+    if (userTeamIds.length === 0) return [];
+    const localTeamMap = Object.fromEntries(teams.map((t) => [t.id, t]));
+    const localTourMap = Object.fromEntries(tournaments.map((t) => [t.id, t]));
+    return allMatches
+      .filter((m) => m.team1_id && m.team2_id && (userTeamIds.includes(m.team1_id) || userTeamIds.includes(m.team2_id)))
+      .map((m) => {
+        const myTeamId = userTeamIds.includes(m.team1_id) ? m.team1_id : m.team2_id;
+        const oppTeamId = myTeamId === m.team1_id ? m.team2_id : m.team1_id;
+        const tour = localTourMap[m.tournament_id];
+        return {
+          id: m.id,
+          tourName: tour ? tour.name : "—",
+          oppName: localTeamMap[oppTeamId] ? teamLabel(localTeamMap[oppTeamId]) : "—",
+          round: m.round,
+          decided: !!m.winner_id,
+          won: m.winner_id === myTeamId,
+        };
+      })
+      .sort((a, b) => b.round - a.round);
+  };
+
+  const searchFriendCandidates = async (query) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setFriendResults([]);
+      return;
+    }
+    const { data, error } = await supabase.from("profiles").select("id, username, avatar_url").ilike("username", `%${q}%`).limit(6);
+    if (error) return;
+    const already = friends.map((f) => f.id);
+    const results = (data || []).filter((p) => p.id !== session?.user.id && !already.includes(p.id));
+    setFriendResults(results.slice(0, 5));
+  };
+
+  const sendFriendRequest = async (receiverId) => {
+    const { error } = await supabase.from("friend_requests").insert({ sender_id: session.user.id, receiver_id: receiverId });
+    if (error) return setErrorMsg("Не удалось отправить запрос (возможно, уже отправлен).");
+    setFriendQuery("");
+    setFriendResults([]);
+    refreshFriends(session.user.id);
+  };
+
+  const acceptFriendRequest = async (requestId) => {
+    const { error } = await supabase.from("friend_requests").update({ status: "accepted" }).eq("id", requestId);
+    if (error) return setErrorMsg(error.message);
+    refreshFriends(session.user.id);
+  };
+
+  const removeFriend = async (requestId) => {
+    const { error } = await supabase.from("friend_requests").delete().eq("id", requestId);
+    if (error) return setErrorMsg(error.message);
+    refreshFriends(session.user.id);
+  };
+
+  const currentUsername = profile?.username || null;
+
+  const maxForMode = (mode) => (mode === "5x5" ? 5 : 2);
+
+  const openCreateTeam = () => {
+    setTeamName("");
+    setTeamTag("");
+    setShowCreateTeam(true);
+  };
+
+  const createTeam = async () => {
+    if (!session || !teamName.trim()) return;
+    if (!profile?.is_admin && myTeams(createTeamMode).length >= 1) {
+      return setErrorMsg(`У вас уже есть команда в режиме ${MODE_LABEL[createTeamMode]} — обычным пользователям доступна только одна команда на режим.`);
+    }
+    if (containsBlockedLink(teamName) || containsBlockedLink(teamTag)) {
+      return setErrorMsg("Название или тег команды не может содержать ссылки/упоминания каналов.");
+    }
+    if (containsProfanity(teamName) || containsProfanity(teamTag)) {
+      return setErrorMsg("Название или тег команды содержит недопустимые слова.");
+    }
+    const max = maxForMode(createTeamMode);
+    const { data: team, error } = await supabase
+      .from("teams")
+      .insert({
+        mode: createTeamMode,
+        name: teamName.trim(),
+        tag: teamTag.trim().toUpperCase().slice(0, 5),
+        owner_id: session.user.id,
+        max_size: max,
+      })
+      .select()
+      .single();
+    if (error) {
+      if (error.code === "23505") return setErrorMsg("Команда с таким названием уже существует в этом режиме.");
+      if (error.code === "42501") return setErrorMsg("Доступна только одна команда на режим.");
+      return setErrorMsg(error.message);
+    }
+    const { error: mErr } = await supabase.from("team_members").insert({ team_id: team.id, member_name: currentUsername });
+    if (mErr) setErrorMsg(mErr.message);
+    setShowCreateTeam(false);
+    refreshTeams();
+  };
+
+  const myTeams = (mode) => teams.filter((t) => t.mode === mode && t.owner_id === session?.user.id);
+
+  const deleteTeam = async (id) => {
+    const { error } = await supabase.from("teams").delete().eq("id", id);
+    if (error) {
+      if (error.code === "23503") {
+        setErrorMsg("Нельзя удалить команду — она уже участвует в турнире (зарегистрирована или есть в сетке).");
+      } else {
+        setErrorMsg(error.message);
+      }
+      setConfirmDeleteTeamId(null);
+      return;
+    }
+    setConfirmDeleteTeamId(null);
+    refreshTeams();
+  };
+
+  const searchTeammate = async (teamId, query) => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setAddMemberResults((prev) => ({ ...prev, [teamId]: [] }));
+      return;
+    }
+    const team = teams.find((t) => t.id === teamId);
+    const taken = (team?.team_members || []).map((m) => m.member_name);
+    const { data, error } = await supabase.from("profiles").select("id, username").ilike("username", `%${q}%`).limit(6);
+    if (error) return;
+    const results = (data || []).filter((p) => !taken.includes(p.username));
+    setAddMemberResults((prev) => ({ ...prev, [teamId]: results.slice(0, 5) }));
+  };
+
+  const inviteToTeam = async (team, profile) => {
+    if ((team.team_members || []).length >= team.max_size) {
+      setErrorMsg("Состав команды уже заполнен.");
+      return;
+    }
+    const { error } = await supabase.from("team_invites").insert({ team_id: team.id, invited_id: profile.id });
+    if (error) return setErrorMsg("Не удалось отправить приглашение (возможно, уже приглашён).");
+    setAddMemberQuery((prev) => ({ ...prev, [team.id]: "" }));
+    setAddMemberResults((prev) => ({ ...prev, [team.id]: [] }));
+  };
+
+  const acceptTeamInvite = async (invite) => {
+    const { error: upErr } = await supabase.from("team_invites").update({ status: "accepted" }).eq("id", invite.id);
+    if (upErr) return setErrorMsg(upErr.message);
+    const { error: mErr } = await supabase
+      .from("team_members")
+      .insert({ team_id: invite.team.id, member_name: currentUsername });
+    if (mErr) setErrorMsg(mErr.message);
+    refreshTeamInvites(session.user.id);
+    refreshTeams();
+  };
+
+  const declineTeamInvite = async (inviteId) => {
+    const { error } = await supabase.from("team_invites").delete().eq("id", inviteId);
+    if (error) return setErrorMsg(error.message);
+    refreshTeamInvites(session.user.id);
+  };
+
+  const createTournament = async () => {
+    if (!newTourName.trim()) return;
+    setTourCreating(true);
+    let banner_url = null;
+    if (newTourBannerFile) {
+      const path = `${Date.now()}-${newTourBannerFile.name}`.replace(/\s+/g, "_");
+      const { error: upErr } = await supabase.storage.from("banners").upload(path, newTourBannerFile);
+      if (upErr) {
+        setTourCreating(false);
+        return setErrorMsg("Не удалось загрузить баннер: " + upErr.message);
+      }
+      const { data: pub } = supabase.storage.from("banners").getPublicUrl(path);
+      banner_url = pub.publicUrl;
+    }
+    const { error } = await supabase.from("tournaments").insert({
+      mode: newTourMode,
+      name: newTourName.trim(),
+      prize_pool: newTourPrize.trim() || null,
+      max_teams: newTourMaxTeams ? parseInt(newTourMaxTeams, 10) : null,
+      banner_url,
+      announce_at: newTourAnnounceAt || null,
+      reg_open_at: newTourRegOpenAt || null,
+      start_at: newTourStartAt || null,
+    });
+    setTourCreating(false);
+    if (error) return setErrorMsg(error.message);
+    setNewTourName("");
+    setNewTourPrize("");
+    setNewTourMaxTeams("");
+    setNewTourBannerFile(null);
+    setNewTourAnnounceAt("");
+    setNewTourRegOpenAt("");
+    setNewTourStartAt("");
+    refreshTournaments();
+  };
+
+  const deleteTournament = async (id) => {
+    const { error } = await supabase.from("tournaments").delete().eq("id", id);
+    if (error) return setErrorMsg(error.message);
+    setConfirmDeleteId(null);
+    if (expandedTour === id) setExpandedTour(null);
+    refreshTournaments();
+  };
+
+  const registerTeam = async (tournamentId, teamId) => {
+    const { error } = await supabase.from("tournament_teams").insert({ tournament_id: tournamentId, team_id: teamId });
+    if (error) return setErrorMsg(error.message);
+    refreshTournaments();
+  };
+
+  const unregisterTeam = async (tournamentId, teamId) => {
+    const { error } = await supabase.from("tournament_teams").delete().eq("tournament_id", tournamentId).eq("team_id", teamId);
+    if (error) return setErrorMsg(error.message);
+    refreshTournaments();
+  };
+
+  const saveAdSlot = async (ad, file) => {
+    setAdUploading((prev) => ({ ...prev, [ad.slot]: true }));
+    let image_url = ad.image_url;
+    if (file) {
+      const path = `slot-${ad.slot}-${Date.now()}.${file.name.split(".").pop()}`;
+      const { error: upErr } = await supabase.storage.from("sponsors").upload(path, file);
+      if (upErr) {
+        setAdUploading((prev) => ({ ...prev, [ad.slot]: false }));
+        return setErrorMsg("Не удалось загрузить картинку: " + upErr.message);
+      }
+      const { data: pub } = supabase.storage.from("sponsors").getPublicUrl(path);
+      image_url = pub.publicUrl;
+    }
+    const link_url = adLinkDrafts[ad.slot] !== undefined ? adLinkDrafts[ad.slot] : ad.link_url || "";
+    const rawExpiry = adExpiryDrafts[ad.slot] !== undefined ? adExpiryDrafts[ad.slot] : null;
+    const expires_at = rawExpiry !== null ? (rawExpiry ? new Date(rawExpiry).toISOString() : null) : ad.expires_at || null;
+    const { error } = await supabase
+      .from("sponsors")
+      .update({ image_url, link_url, expires_at, is_active: true, updated_at: new Date().toISOString() })
+      .eq("id", ad.id);
+    setAdUploading((prev) => ({ ...prev, [ad.slot]: false }));
+    if (error) return setErrorMsg(error.message);
+    refreshAds();
+  };
+
+  const toggleAdActive = async (ad) => {
+    const { error } = await supabase.from("sponsors").update({ is_active: !ad.is_active }).eq("id", ad.id);
+    if (error) return setErrorMsg(error.message);
+    refreshAds();
+  };
+
+  const saveMapImage = async (mapKey, file) => {
+    setMapImageUploading((prev) => ({ ...prev, [mapKey]: true }));
+    const path = `${mapKey}-${Date.now()}.${file.name.split(".").pop()}`;
+    const { error: upErr } = await supabase.storage.from("map-covers").upload(path, file);
+    if (upErr) {
+      setMapImageUploading((prev) => ({ ...prev, [mapKey]: false }));
+      return setErrorMsg("Не удалось загрузить картинку: " + upErr.message);
+    }
+    const { data: pub } = supabase.storage.from("map-covers").getPublicUrl(path);
+    const { error } = await supabase
+      .from("map_images")
+      .upsert({ map_key: mapKey, image_url: pub.publicUrl, updated_at: new Date().toISOString() }, { onConflict: "map_key" });
+    setMapImageUploading((prev) => ({ ...prev, [mapKey]: false }));
+    if (error) return setErrorMsg(error.message);
+    refreshMapImages();
+  };
+
+  const removeMapImage = async (mapKey) => {
+    const { error } = await supabase.from("map_images").update({ image_url: null }).eq("map_key", mapKey);
+    if (error) return setErrorMsg(error.message);
+    refreshMapImages();
+  };
+
+  // Создаёт запись "готовности" для матча, если у него уже известны ОБЕ
+  // команды (не bye) и такой записи ещё нет — тогда обеим командам даётся
+  // 1 минута на подтверждение "Принять" прежде чем можно будет играть.
+  const ensureReadyCheck = async (tournamentId, matchId, round, matchIndex, team1Id, team2Id) => {
+    if (!team1Id || !team2Id) return;
+    const deadline = new Date(Date.now() + 60 * 1000).toISOString();
+    await supabase
+      .from("match_ready_checks")
+      .upsert(
+        { match_id: matchId, tournament_id: tournamentId, round, match_index: matchIndex, team1_id: team1Id, team2_id: team2Id, deadline },
+        { onConflict: "match_id", ignoreDuplicates: true }
+      );
+    refreshReadyChecks();
+  };
+
+  // Присуждает победу winnerTeamId в конкретном матче сетки (техническое
+  // поражение соперника) и проталкивает победителя в следующий раунд —
+  // не завязано на открытую админом сетку (expandedRounds), поэтому
+  // может быть вызвано из любого места, включая браузер обычного игрока.
+  const forfeitWinner = async (tournamentId, matchId, round, matchIndex, winnerTeamId) => {
+    await supabase.from("matches").update({ winner_id: winnerTeamId }).eq("id", matchId);
+    const { data: allRows } = await supabase.from("matches").select("round").eq("tournament_id", tournamentId);
+    const totalRounds = allRows?.length ? Math.max(...allRows.map((m) => m.round)) + 1 : 0;
+    if (round + 1 < totalRounds) {
+      const nextMatchIndex = Math.floor(matchIndex / 2);
+      const slotField = matchIndex % 2 === 0 ? "team1_id" : "team2_id";
+      const { data: nextMatch } = await supabase
+        .from("matches")
+        .select("id, round, match_index, team1_id, team2_id")
+        .eq("tournament_id", tournamentId)
+        .eq("round", round + 1)
+        .eq("match_index", nextMatchIndex)
+        .single();
+      if (nextMatch) {
+        await supabase.from("matches").update({ [slotField]: winnerTeamId, winner_id: null }).eq("id", nextMatch.id);
+        const otherField = slotField === "team1_id" ? "team2_id" : "team1_id";
+        const otherTeamId = nextMatch[otherField];
+        if (otherTeamId) await ensureReadyCheck(tournamentId, nextMatch.id, nextMatch.round, nextMatch.match_index, winnerTeamId, otherTeamId);
+      }
+    } else {
+      await supabase.from("tournaments").update({ status: "finished" }).eq("id", tournamentId);
+      refreshTournaments();
+    }
+    await autoResolveByes(tournamentId);
+    refreshAllMatches();
+    if (expandedTour === tournamentId) loadBracket(tournamentId);
+  };
+
+  // Проверяет один "просроченный" ready-check и, если время истекло и
+  // одна из команд так и не нажала "Принять", присуждает техническое
+  // поражение. Перечитывает свежую строку из базы перед решением, чтобы
+  // не спорить с другим браузером, который мог обработать её первым.
+  const resolveExpiredReadyCheck = async (rc) => {
+    const { data: fresh } = await supabase.from("match_ready_checks").select("*").eq("id", rc.id).single();
+    if (!fresh || fresh.status !== "pending") return;
+    if (new Date(fresh.deadline) > new Date()) return;
+    const team1Ok = !!fresh.team1_accepted_at;
+    const team2Ok = !!fresh.team2_accepted_at;
+    if (team1Ok && team2Ok) return;
+    if (!team1Ok && !team2Ok) {
+      // ни одна команда не приняла — не решаем автоматически, кто прав,
+      // просто помечаем как требующий ручного вмешательства админа
+      await supabase.from("match_ready_checks").update({ status: "team1_forfeit" }).eq("id", fresh.id);
+      return;
+    }
+    const winnerTeamId = team1Ok ? fresh.team1_id : fresh.team2_id;
+    const newStatus = team1Ok ? "team2_forfeit" : "team1_forfeit";
+    await supabase.from("match_ready_checks").update({ status: newStatus }).eq("id", fresh.id);
+    await forfeitWinner(fresh.tournament_id, fresh.match_id, fresh.round, fresh.match_index, winnerTeamId);
+  };
+
+  // Аварийный сброс для админа — если что-то зависло (тестовые данные,
+  // сбой), можно принудительно удалить окно "Принять" или бан карт.
+  const cancelReadyCheck = async (rc) => {
+    await supabase.from("match_ready_checks").delete().eq("id", rc.id);
+    refreshReadyChecks();
+  };
+
+  const cancelVeto = async (veto) => {
+    await supabase.from("match_vetoes").delete().eq("id", veto.id);
+    refreshMatchVetoes();
+  };
+
+  const cancelCoinflip = async (coinflip) => {
+    await supabase.from("match_coinflips").delete().eq("id", coinflip.id);
+    refreshMatchCoinflips();
+  };
+
+  const spinCoinflip = async (coinflip) => {
+    const myTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === currentUsername)).map((t) => t.id);
+    if (!myTeamIds.includes(coinflip.spinner_team_id) || coinflip.status !== "pending") return;
+    const reelResults = [Math.random() < 0.5, Math.random() < 0.5, Math.random() < 0.5];
+    const ctCount = reelResults.filter(Boolean).length;
+    const spinnerGetsCT = ctCount >= 2;
+    const otherTeamId = coinflip.spinner_team_id === coinflip.team1_id ? coinflip.team2_id : coinflip.team1_id;
+    const ctTeamId = spinnerGetsCT ? coinflip.spinner_team_id : otherTeamId;
+    await supabase
+      .from("match_coinflips")
+      .update({ reel_results: reelResults, ct_team_id: ctTeamId, status: "completed" })
+      .eq("id", coinflip.id);
+    refreshMatchCoinflips();
+  };
+
+  const acceptReadyCheck = async (rc) => {
+    const myTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === currentUsername)).map((t) => t.id);
+    const isTeam1 = myTeamIds.includes(rc.team1_id);
+    const field = isTeam1 ? "team1_accepted_at" : "team2_accepted_at";
+    const { data, error } = await supabase
+      .from("match_ready_checks")
+      .update({ [field]: new Date().toISOString() })
+      .eq("id", rc.id)
+      .select()
+      .single();
+    if (error) return setErrorMsg(error.message);
+    if (data.team1_accepted_at && data.team2_accepted_at) {
+      await supabase.from("match_ready_checks").update({ status: "both_accepted" }).eq("id", rc.id);
+      // Обе команды готовы — запускаем бан карт. Кто банит первым решаем
+      // случайно; upsert с ignoreDuplicates защищает от повторного
+      // создания, если оба клиента одновременно это заметят.
+      const firstTurnTeamId = Math.random() < 0.5 ? rc.team1_id : rc.team2_id;
+      await supabase.from("match_vetoes").upsert(
+        {
+          match_id: rc.match_id,
+          tournament_id: rc.tournament_id,
+          team1_id: rc.team1_id,
+          team2_id: rc.team2_id,
+          maps_remaining: MAP_POOL,
+          banned_maps: [],
+          current_turn_team_id: firstTurnTeamId,
+        },
+        { onConflict: "match_id", ignoreDuplicates: true }
+      );
+      refreshMatchVetoes();
+    }
+    refreshReadyChecks();
+  };
+
+  const banMap = async (veto, mapKey) => {
+    const myTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === currentUsername)).map((t) => t.id);
+    const captainTeam = teams.find((t) => t.owner_id === session?.user.id && myTeamIds.includes(t.id) && (t.id === veto.team1_id || t.id === veto.team2_id));
+    if (!captainTeam || captainTeam.id !== veto.current_turn_team_id) return;
+    const remaining = veto.maps_remaining.filter((m) => m !== mapKey);
+    const newBanned = [...veto.banned_maps, { map: mapKey, team_id: captainTeam.id, order: veto.banned_maps.length + 1 }];
+    if (remaining.length === 1) {
+      await supabase
+        .from("match_vetoes")
+        .update({ maps_remaining: remaining, banned_maps: newBanned, final_map: remaining[0], status: "completed", current_turn_team_id: null })
+        .eq("id", veto.id);
+      const spinnerTeamId = Math.random() < 0.5 ? veto.team1_id : veto.team2_id;
+      await supabase.from("match_coinflips").upsert(
+        {
+          match_id: veto.match_id,
+          tournament_id: veto.tournament_id,
+          team1_id: veto.team1_id,
+          team2_id: veto.team2_id,
+          spinner_team_id: spinnerTeamId,
+        },
+        { onConflict: "match_id", ignoreDuplicates: true }
+      );
+      refreshMatchCoinflips();
+    } else {
+      const nextTurn = veto.current_turn_team_id === veto.team1_id ? veto.team2_id : veto.team1_id;
+      await supabase
+        .from("match_vetoes")
+        .update({ maps_remaining: remaining, banned_maps: newBanned, current_turn_team_id: nextTurn })
+        .eq("id", veto.id);
+    }
+    refreshMatchVetoes();
+  };
+
+  // Тикающий таймер для отображения обратного отсчёта в окне "Принять".
+  useEffect(() => {
+    const id = setInterval(() => setReadyCheckNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Периодически проверяем, не истекло ли время на принятие у кого-то из
+  // видимых нам ready-check'ов — если да, присуждаем техническое поражение.
+  useEffect(() => {
+    const id = setInterval(() => {
+      readyChecks.forEach((rc) => {
+        if (new Date(rc.deadline) <= new Date()) resolveExpiredReadyCheck(rc);
+      });
+    }, 3000);
+    return () => clearInterval(id);
+  }, [readyChecks]);
+
+  const autoResolveByes = async (tournamentId) => {
+    const { data, error } = await supabase
+      .from("matches")
+      .select("id, round, match_index, team1_id, team2_id, winner_id")
+      .eq("tournament_id", tournamentId)
+      .order("round")
+      .order("match_index");
+    if (error || !data || !data.length) return;
+    const totalRounds = Math.max(...data.map((m) => m.round)) + 1;
+    const rounds = Array.from({ length: totalRounds }, () => []);
+    data.forEach((m) => {
+      rounds[m.round][m.match_index] = { ...m };
+    });
+
+    // dead[r][i] = true only if this match slot can structurally NEVER receive a team
+    // (i.e. both its own slots are empty at round 0, or both its feeder matches are dead).
+    // A slot that's simply "not decided yet" by a real, still-open match is NOT dead.
+    const dead = Array.from({ length: totalRounds }, () => []);
+    for (let r = 0; r < totalRounds; r++) {
+      rounds[r].forEach((m, i) => {
+        if (!m) {
+          dead[r][i] = true;
+          return;
+        }
+        if (r === 0) {
+          dead[r][i] = !m.team1_id && !m.team2_id;
+        } else {
+          const d1 = dead[r - 1][i * 2];
+          const d2 = dead[r - 1][i * 2 + 1];
+          dead[r][i] = !!d1 && !!d2;
+        }
+      });
+    }
+
+    const updates = {};
+    const markUpdate = (id, field, value) => {
+      updates[id] = { ...(updates[id] || {}), [field]: value };
+    };
+
+    let becameFinished = false;
+    for (let r = 0; r < totalRounds; r++) {
+      rounds[r].forEach((m, i) => {
+        if (!m || m.winner_id) return;
+        let forcedWinner = null;
+        if (r === 0) {
+          if (m.team1_id && !m.team2_id) forcedWinner = m.team1_id;
+          else if (m.team2_id && !m.team1_id) forcedWinner = m.team2_id;
+        } else {
+          const leftDead = dead[r - 1][i * 2];
+          const rightDead = dead[r - 1][i * 2 + 1];
+          if (m.team1_id && !m.team2_id && rightDead) forcedWinner = m.team1_id;
+          else if (m.team2_id && !m.team1_id && leftDead) forcedWinner = m.team2_id;
+        }
+        if (!forcedWinner) return;
+        m.winner_id = forcedWinner;
+        markUpdate(m.id, "winner_id", forcedWinner);
+        if (r + 1 < totalRounds) {
+          const next = rounds[r + 1][Math.floor(i / 2)];
+          if (next) {
+            const field = i % 2 === 0 ? "team1_id" : "team2_id";
+            next[field] = forcedWinner;
+            markUpdate(next.id, field, forcedWinner);
+          }
+        } else {
+          becameFinished = true;
+        }
+      });
+    }
+
+    const ids = Object.keys(updates);
+    if (ids.length) {
+      for (const id of ids) {
+        await supabase.from("matches").update(updates[id]).eq("id", id);
+      }
+      if (becameFinished) {
+        await supabase.from("tournaments").update({ status: "finished" }).eq("id", tournamentId);
+        refreshTournaments();
+      }
+    }
+
+    // Любой матч, где теперь известны ОБЕ команды и он ещё не сыгран —
+    // должен получить окно "Принять" (если ещё не получил).
+    for (let r = 0; r < totalRounds; r++) {
+      for (const m of rounds[r]) {
+        if (m && m.team1_id && m.team2_id && !m.winner_id) {
+          await ensureReadyCheck(tournamentId, m.id, r, m.match_index, m.team1_id, m.team2_id);
+        }
+      }
+    }
+
+    refreshAllMatches();
+  };
+
+  const loadBracket = async (tournamentId) => {
+    await autoResolveByes(tournamentId);
+    const { data, error } = await supabase
+      .from("matches")
+      .select("id, round, match_index, team1_id, team2_id, winner_id")
+      .eq("tournament_id", tournamentId)
+      .order("round")
+      .order("match_index");
+    if (error) return setErrorMsg(error.message);
+    const totalRounds = data.length ? Math.max(...data.map((m) => m.round)) + 1 : 0;
+    const rounds = Array.from({ length: totalRounds }, () => []);
+    data.forEach((m) => {
+      rounds[m.round][m.match_index] = m;
+    });
+    setExpandedRounds(rounds);
+  };
+
+  const toggleExpand = async (tournamentId, hasBracket) => {
+    if (expandedTour === tournamentId) {
+      setExpandedTour(null);
+      setExpandedRounds(null);
+      return;
+    }
+    setExpandedTour(tournamentId);
+    if (hasBracket) await loadBracket(tournamentId);
+  };
+
+  const generateBracket = async (tournamentId) => {
+    const tour = tournaments.find((t) => t.id === tournamentId);
+    const teamIds = (tour.tournament_teams || []).map((tt) => tt.team_id);
+    if (teamIds.length < 2) return;
+
+    const shuffled = shuffleArr(teamIds);
+    const size = Math.max(2, nextPow2(shuffled.length));
+    while (shuffled.length < size) shuffled.push(null);
+    const totalRounds = Math.log2(size);
+
+    const roundsArr = [];
+    const round0 = [];
+    for (let i = 0; i < size / 2; i++) {
+      const team1_id = shuffled[i * 2];
+      const team2_id = shuffled[i * 2 + 1];
+      let winner_id = null;
+      if (team1_id && !team2_id) winner_id = team1_id;
+      else if (team2_id && !team1_id) winner_id = team2_id;
+      round0.push({ round: 0, match_index: i, team1_id, team2_id, winner_id });
+    }
+    roundsArr.push(round0);
+    for (let r = 1; r < totalRounds; r++) {
+      const count = size / Math.pow(2, r + 1);
+      const round = [];
+      for (let i = 0; i < count; i++) round.push({ round: r, match_index: i, team1_id: null, team2_id: null, winner_id: null });
+      roundsArr.push(round);
+    }
+    round0.forEach((m, i) => {
+      if (m.winner_id && roundsArr[1]) {
+        const next = roundsArr[1][Math.floor(i / 2)];
+        if (i % 2 === 0) next.team1_id = m.winner_id;
+        else next.team2_id = m.winner_id;
+      }
+    });
+
+    const rows = roundsArr.flat().map((m) => ({ tournament_id: tournamentId, ...m }));
+    const { error } = await supabase.from("matches").insert(rows);
+    if (error) return setErrorMsg(error.message);
+    await supabase.from("tournaments").update({ status: "live" }).eq("id", tournamentId);
+    refreshTournaments();
+    refreshAllMatches();
+    setExpandedTour(tournamentId);
+    loadBracket(tournamentId);
+  };
+
+  const declareWinner = async (tournamentId, matchRow, winnerTeamId) => {
+    const { error } = await supabase.from("matches").update({ winner_id: winnerTeamId }).eq("id", matchRow.id);
+    if (error) return setErrorMsg(error.message);
+
+    const totalRounds = expandedRounds.length;
+    if (matchRow.round + 1 < totalRounds) {
+      const nextMatchIndex = Math.floor(matchRow.match_index / 2);
+      const slotField = matchRow.match_index % 2 === 0 ? "team1_id" : "team2_id";
+      const { data: nextMatch } = await supabase
+        .from("matches")
+        .select("id")
+        .eq("tournament_id", tournamentId)
+        .eq("round", matchRow.round + 1)
+        .eq("match_index", nextMatchIndex)
+        .single();
+      if (nextMatch) {
+        await supabase.from("matches").update({ [slotField]: winnerTeamId, winner_id: null }).eq("id", nextMatch.id);
+      }
+    } else {
+      await supabase.from("tournaments").update({ status: "finished" }).eq("id", tournamentId);
+      refreshTournaments();
+    }
+    refreshAllMatches();
+    loadBracket(tournamentId);
+  };
+
+  const teamMap = Object.fromEntries(teams.map((t) => [t.id, t]));
+
+  const computeLeaderboard = (mode) => {
+    const tourIds = new Set(tournaments.filter((t) => t.mode === mode).map((t) => t.id));
+    const relevant = allMatches.filter((m) => tourIds.has(m.tournament_id));
+    const maxRoundByTour = {};
+    relevant.forEach((m) => {
+      maxRoundByTour[m.tournament_id] = Math.max(maxRoundByTour[m.tournament_id] || 0, m.round);
+    });
+    const stats = {};
+    relevant.forEach((m) => {
+      if (!stats[m.winner_id]) stats[m.winner_id] = { id: m.winner_id, wins: 0, titles: 0 };
+      const wasRealMatch = !!(m.team1_id && m.team2_id);
+      if (wasRealMatch) stats[m.winner_id].wins += 1;
+      if (m.round === maxRoundByTour[m.tournament_id] && wasRealMatch) stats[m.winner_id].titles += 1;
+    });
+    return Object.values(stats)
+      .map((s) => ({ ...s, name: teamMap[s.id] ? teamLabel(teamMap[s.id]) : "—" }))
+      .sort((a, b) => b.titles - a.titles || b.wins - a.wins)
+      .slice(0, 10);
+  };
+
+  if (authLoading) {
+    return (
+      <div style={styles.loadingWrap}>
+        <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} color="#D9414C" />
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", color: "#AE9B99", fontSize: 13 }}>
+          ЗАГРУЗКА ПЛАТФОРМЫ...
+        </span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  const tourList = tournaments;
+  const leaderboard5x5 = computeLeaderboard("5x5");
+  const leaderboard2x2 = computeLeaderboard("2x2");
+
+  const renderBracket = (tournamentId, rounds, interactive) => {
+    if (!rounds || rounds.length === 0) return null;
+    const g = computeGeometry(rounds);
+    const totalRounds = rounds.length;
+    return (
+      <div className="nur-bracket-scroll" style={{ overflowX: "auto", paddingTop: 30, paddingBottom: 10 }}>
+        <div style={{ position: "relative", height: g.containerHeight, width: g.width, minWidth: g.width }}>
+          <svg width={g.width} height={g.containerHeight} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
+            {g.connectors.map((c) => (
+              <g key={c.key} stroke="#D9414C55" strokeWidth="1.5" fill="none" strokeDasharray="3 3">
+                <line x1={c.xLeft} y1={c.y1} x2={c.xMid} y2={c.y1} />
+                <line x1={c.xLeft} y1={c.y2} x2={c.xMid} y2={c.y2} />
+                <line x1={c.xMid} y1={c.y1} x2={c.xMid} y2={c.y2} />
+                <line x1={c.xMid} y1={c.yMid} x2={c.xLeft + ROUND_GAP} y2={c.yMid} />
+              </g>
+            ))}
+          </svg>
+          {rounds.map((round, r) => (
+            <div key={r}>
+              <div
+                style={{
+                  position: "absolute",
+                  top: -26,
+                  left: r * (CARD_W + ROUND_GAP),
+                  width: CARD_W,
+                  textAlign: "center",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 11,
+                  letterSpacing: 1,
+                  color: "#AE9B99",
+                }}
+              >
+                {roundLabel(totalRounds, r)}
+              </div>
+              {round.map((m, i) => {
+                if (!m) return null;
+                const y = g.centerY(r, i) - CARD_H / 2;
+                const t1 = teamMap[m.team1_id];
+                const t2 = teamMap[m.team2_id];
+                const canDecide = interactive && m.team1_id && m.team2_id;
+                return (
+                  <div key={m.id} style={{ position: "absolute", top: y, left: r * (CARD_W + ROUND_GAP), width: CARD_W, height: CARD_H }}>
+                    <div style={styles.matchCard}>
+                      {[
+                        { team: t1, id: m.team1_id },
+                        { team: t2, id: m.team2_id },
+                      ].map((slot, idx) => {
+                        const isWinner = m.winner_id && slot.id === m.winner_id;
+                        const isLoser = m.winner_id && slot.id && slot.id !== m.winner_id;
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => canDecide && slot.id && declareWinner(tournamentId, m, slot.id)}
+                            style={{
+                              height: "50%",
+                              display: "flex",
+                              alignItems: "center",
+                              cursor: canDecide && slot.id ? "pointer" : "default",
+                              borderBottom: idx === 0 ? "1px solid #3D2226" : "none",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                display: "flex",
+                                alignItems: "center",
+                                padding: "0 10px",
+                                fontSize: 12.5,
+                                borderLeft: isWinner ? "2px solid #D9414C" : "2px solid transparent",
+                                color: isLoser ? "#8C7876" : isWinner ? "#E8B84D" : "#F3ECEA",
+                                textDecoration: isLoser ? "line-through" : "none",
+                              }}
+                            >
+                              {slot.team ? teamLabel(slot.team) : slot.id ? "…" : <span style={{ color: "#4A5054", fontStyle: "italic" }}>bye</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={styles.page}>
+      <style>{`
+        * { box-sizing: border-box; }
+        .nur-in::placeholder { color: #8C7876; }
+        .nur-btn:disabled { opacity: .35; cursor: not-allowed; }
+        .nur-bracket-scroll { scrollbar-width: thin; scrollbar-color: #3D2226 transparent; }
+        .nur-bracket-scroll::-webkit-scrollbar { height: 6px; }
+        .nur-bracket-scroll::-webkit-scrollbar-track { background: transparent; }
+        .nur-bracket-scroll::-webkit-scrollbar-thumb { background: #3D2226; border-radius: 3px; }
+        .nur-bracket-scroll::-webkit-scrollbar-thumb:hover { background: #5A2E33; }
+        .nur-chat-scroll { scrollbar-width: thin; scrollbar-color: #3D2226 transparent; }
+        .nur-chat-scroll::-webkit-scrollbar { width: 6px; }
+        .nur-chat-scroll::-webkit-scrollbar-track { background: transparent; }
+        .nur-chat-scroll::-webkit-scrollbar-thumb { background: linear-gradient(#5A2E33, #2E1B1E); border-radius: 3px; }
+        .nur-chat-scroll::-webkit-scrollbar-thumb:hover { background: #7A3A40; }
+        @keyframes nur-bell-blink {
+          0%, 100% { opacity: 1; filter: drop-shadow(0 0 0px rgba(217,65,76,0)); }
+          50% { opacity: 0.35; filter: drop-shadow(0 0 6px rgba(217,65,76,0.9)); }
+        }
+        .nur-bell-blink { animation: nur-bell-blink 1s ease-in-out infinite; }
+        @keyframes nur-toast-in {
+          0% { opacity: 0; transform: translateX(30px); }
+          100% { opacity: 1; transform: translateX(0); }
+        }
+        .nur-volume-slider {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: 8px;
+          border-radius: 4px;
+          background: linear-gradient(90deg, #5A0F14, #D9414C 55%, #E8A33D);
+          outline: none;
+          position: relative;
+          z-index: 1;
+        }
+        .nur-volume-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: radial-gradient(circle at 35% 30%, #FFFDF9, #F3ECEA 60%, #D9414C 130%);
+          border: 2px solid #E8A33D;
+          box-shadow: 0 0 10px rgba(217,65,76,0.7), 0 0 2px rgba(0,0,0,0.5);
+          cursor: pointer;
+        }
+        .nur-volume-slider::-moz-range-thumb {
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          background: radial-gradient(circle at 35% 30%, #FFFDF9, #F3ECEA 60%, #D9414C 130%);
+          border: 2px solid #E8A33D;
+          box-shadow: 0 0 10px rgba(217,65,76,0.7);
+          cursor: pointer;
+        }
+        .nur-volume-slider::-moz-range-track {
+          height: 8px;
+          border-radius: 4px;
+          background: linear-gradient(90deg, #5A0F14, #D9414C 55%, #E8A33D);
+        }
+        .nur-mode-btn { background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01)); transition: background .25s ease, color .25s ease, border-color .25s ease, box-shadow .25s ease, transform .12s ease; }
+        .nur-mode-btn:hover:not(.active) { background: linear-gradient(180deg, rgba(232,163,61,0.12), rgba(232,163,61,0.04)); border-color: #E8A33D; color: #E8A33D; }
+        .nur-veto-card { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease, filter .2s ease; }
+        .nur-veto-card.pickable:hover {
+          transform: skewX(-7deg) translateY(-14px) scale(1.03) !important;
+          border-color: #D9414C !important;
+          box-shadow: 0 22px 46px rgba(0,0,0,0.7), 0 0 34px rgba(217,65,76,0.45) !important;
+        }
+        .nur-veto-bg-layer {
+          position: absolute;
+          inset: -40% -80%;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          gap: 30px;
+          pointer-events: none;
+          user-select: none;
+          transform: rotate(-6deg);
+          will-change: transform;
+          transition: transform 0.12s ease-out;
+          z-index: 0;
+        }
+        .nur-veto-bg-row { display: flex; gap: 44px; white-space: nowrap; font-family: 'Anton', sans-serif; line-height: 1; }
+        .nur-veto-bg-far .nur-veto-bg-row { font-size: 58px; }
+        .nur-veto-bg-far { filter: blur(2.5px); opacity: 0.5; }
+        .nur-veto-bg-far .nur-veto-bg-nur { color: rgba(255,255,255,0.035); }
+        .nur-veto-bg-far .nur-veto-bg-tour { color: transparent; -webkit-text-stroke: 1px rgba(255,255,255,0.04); }
+        .nur-veto-bg-mid .nur-veto-bg-row { font-size: 88px; }
+        .nur-veto-bg-mid { filter: blur(1px); opacity: 0.85; }
+        .nur-veto-bg-mid .nur-veto-bg-nur { color: rgba(255,255,255,0.055); }
+        .nur-veto-bg-mid .nur-veto-bg-tour { color: transparent; -webkit-text-stroke: 1.4px rgba(255,255,255,0.06); }
+        .nur-veto-bg-near .nur-veto-bg-row { font-size: 128px; gap: 60px; }
+        .nur-veto-bg-near .nur-veto-bg-nur { color: rgba(255,255,255,0.045); }
+        .nur-veto-bg-near .nur-veto-bg-tour { color: transparent; -webkit-text-stroke: 1.8px rgba(255,255,255,0.05); }
+        @keyframes nur-veto-ban-shake {
+          0% { transform: skewX(-7deg) translateX(0); }
+          20% { transform: skewX(-7deg) translateX(-5px); }
+          40% { transform: skewX(-7deg) translateX(5px); }
+          60% { transform: skewX(-7deg) translateX(-3px); }
+          80% { transform: skewX(-7deg) translateX(3px); }
+          100% { transform: skewX(-7deg) translateX(0); }
+        }
+        @keyframes nur-veto-ban-sweep {
+          from { transform: translateY(-110%); }
+          to { transform: translateY(110%); }
+        }
+        @keyframes nur-veto-badge-stamp {
+          0% { opacity: 0; transform: translate(-50%,-50%) skewX(7deg) scale(2.4) rotate(-16deg); }
+          55% { opacity: 1; transform: translate(-50%,-50%) skewX(7deg) scale(0.92) rotate(3deg); }
+          100% { opacity: 1; transform: translate(-50%,-50%) skewX(7deg) scale(1) rotate(0); }
+        }
+        @keyframes nur-veto-flash-out {
+          0% { opacity: 0.85; }
+          100% { opacity: 0; }
+        }
+        .nur-veto-card.banning { animation: nur-veto-ban-shake 0.45s ease; }
+        .nur-veto-sweep {
+          position: absolute; left: -20%; right: -20%; top: 0; height: 60%;
+          background: linear-gradient(180deg, transparent, rgba(217,65,76,0.55), transparent);
+          animation: nur-veto-ban-sweep 0.55s ease forwards;
+          pointer-events: none;
+        }
+        .nur-veto-flash {
+          position: absolute; inset: 0; background: #D9414C;
+          animation: nur-veto-flash-out 0.5s ease forwards;
+          pointer-events: none;
+        }
+        .nur-veto-badge-anim { animation: nur-veto-badge-stamp 0.5s cubic-bezier(0.2,1.4,0.4,1) both; }
+        .nur-reel-frame.nur-reel-spinning .nur-reel-strip { filter: blur(1.6px); }
+        .nur-reel-frame::after {
+          content: '';
+          position: absolute; inset: 0; pointer-events: none; z-index: 3;
+          background: linear-gradient(180deg, rgba(5,3,4,0.96) 0%, transparent 27%, transparent 73%, rgba(5,3,4,0.96) 100%);
+        }
+        .nur-reel-frame .nur-reel-payline { transition: background 0.3s ease, border-color 0.3s ease; }
+        .nur-reel-frame.nur-reel-locked .nur-reel-payline { background: rgba(232,163,61,0.15); border-color: rgba(232,163,61,0.8); }
+        @keyframes nur-reel-pop {
+          0% { box-shadow: inset 0 0 0 0 rgba(232,163,61,0); }
+          28% { box-shadow: inset 0 0 46px 7px rgba(232,163,61,0.55); }
+          100% { box-shadow: inset 0 0 0 0 rgba(232,163,61,0); }
+        }
+        .nur-reel-frame.nur-reel-pop { animation: nur-reel-pop 0.55s ease-out; }
+        .nur-spin-btn {
+          position: relative;
+          overflow: hidden;
+          cursor: pointer;
+          padding: 18px 56px;
+          border: none;
+          border-radius: 999px;
+          font-family: 'Anton', sans-serif;
+          font-size: 21px;
+          letter-spacing: 6px;
+          text-transform: uppercase;
+          color: #2a1607;
+          text-shadow: 0 1px 0 rgba(255,255,255,0.45), 0 -1px 1px rgba(90,50,5,0.35);
+          background: linear-gradient(180deg, #ffdc95 0%, #e8a33d 46%, #bd7a19 100%);
+          box-shadow:
+            0 2px 0 rgba(255,255,255,0.6) inset,
+            0 -4px 10px rgba(120,70,10,0.55) inset,
+            0 16px 34px rgba(232,163,61,0.42),
+            0 0 0 1px rgba(255,228,175,0.55),
+            0 0 0 8px rgba(232,163,61,0.10);
+          transition: transform 0.16s cubic-bezier(0.2,1.5,0.4,1), box-shadow 0.2s ease, filter 0.2s ease;
+        }
+        .nur-spin-btn:hover:not(:disabled) {
+          transform: translateY(-3px) scale(1.035);
+          box-shadow:
+            0 2px 0 rgba(255,255,255,0.65) inset,
+            0 -4px 10px rgba(120,70,10,0.5) inset,
+            0 22px 44px rgba(232,163,61,0.6),
+            0 0 0 1px rgba(255,238,200,0.7),
+            0 0 0 12px rgba(232,163,61,0.15);
+        }
+        .nur-spin-btn:active:not(:disabled) { transform: translateY(1px) scale(0.97); }
+        .nur-spin-btn:disabled { filter: grayscale(0.65) brightness(0.55); cursor: default; box-shadow: none; }
+        .nur-spin-btn::after {
+          content: '';
+          position: absolute; top: -40%; bottom: -40%; width: 70px;
+          background: linear-gradient(100deg, transparent, rgba(255,255,255,0.8), transparent);
+          transform: skewX(-18deg);
+          animation: nur-spin-shine 3s ease-in-out infinite;
+          pointer-events: none;
+        }
+        @keyframes nur-spin-shine { 0% { left: -100px; } 55% { left: 125%; } 100% { left: 125%; } }
+        .nur-spin-btn:disabled::after { animation: none; opacity: 0; }
+        @keyframes nur-spin-ring-pulse { 0% { transform: scale(1); opacity: 0.5; } 100% { transform: scale(1.32); opacity: 0; } }
+        .nur-spin-ring {
+          position: absolute; inset: 0; border-radius: 999px;
+          border: 2px solid rgba(232,163,61,0.65);
+          pointer-events: none;
+          animation: nur-spin-ring-pulse 2s ease-out infinite;
+        }
+        .nur-mode-btn:active { transform: scale(0.96); }
+        @keyframes nur-mode-shimmer {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        .nur-mode-btn.active {
+          background: linear-gradient(120deg, #D9414C 0%, #E8A33D 35%, #D9414C 70%, #E8A33D 100%);
+          background-size: 300% 300%;
+          animation: nur-mode-shimmer 3.2s ease infinite;
+        }
+        .nur-mode-smoke-field { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+        .nur-mode-puff2 {
+          position: absolute;
+          border-radius: 50%;
+          filter: blur(22px);
+          opacity: 0;
+          mix-blend-mode: screen;
+          animation: nur-mode-drift var(--dur) ease-out forwards;
+          animation-delay: var(--delay);
+        }
+        @keyframes nur-mode-drift {
+          0%   { opacity: 0; transform: translate(0, 0) scale(0.25); }
+          12%  { opacity: var(--peak); }
+          100% { opacity: 0; transform: translate(var(--x1), var(--y1)) scale(var(--s1)); }
+        }
+        @keyframes nur-smoke-sweep {
+          0%   { transform: translateX(-40%); opacity: 0; }
+          8%   { opacity: 0.9; }
+          45%  { opacity: 0.9; }
+          52%  { transform: translateX(220%); opacity: 0; }
+          100% { transform: translateX(220%); opacity: 0; }
+        }
+        .nur-smoke {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 45%;
+          height: 100%;
+          pointer-events: none;
+          z-index: 0;
+          background:
+            radial-gradient(ellipse 70% 90% at 30% 50%, rgba(217,65,76,0.55), transparent 65%),
+            radial-gradient(ellipse 55% 70% at 70% 40%, rgba(232,163,61,0.30), transparent 60%);
+          filter: blur(24px);
+          animation: nur-smoke-sweep 4.6s ease-in-out infinite;
+        }
+        @keyframes nur-menu-smoke {
+          0%   { transform: translate(-6%, 0%) rotate(0deg) scale(1); opacity: 0.5; }
+          33%  { transform: translate(5%, -6%) rotate(4deg) scale(1.15); opacity: 0.75; }
+          66%  { transform: translate(-3%, 5%) rotate(-3deg) scale(1.05); opacity: 0.6; }
+          100% { transform: translate(-6%, 0%) rotate(0deg) scale(1); opacity: 0.5; }
+        }
+        .nur-menu-smoke {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          z-index: 0;
+          background:
+            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(217,65,76,0.55), transparent 60%),
+            radial-gradient(ellipse 55% 45% at 80% 30%, rgba(232,163,61,0.35), transparent 60%),
+            radial-gradient(ellipse 70% 60% at 50% 90%, rgba(217,65,76,0.30), transparent 65%);
+          filter: blur(22px);
+          animation: nur-menu-smoke 9s ease-in-out infinite;
+        }
+      `}</style>
+
+      <div style={{ ...styles.nav, position: "relative" }}>
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 0, pointerEvents: "none" }}>
+          <div className="nur-smoke" />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 20, position: "relative", zIndex: 1 }}>
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
+            onClick={() => {
+              setActiveTab("tournaments");
+              setViewingUser(null);
+              setNavMenuOpen(false);
+            }}
+          >
+            <img src={logoImg} alt="NUR" style={styles.logoImg} />
+            <span style={styles.logo}>
+              NUR <span style={{ color: "#D9414C" }}>TOURNAMENTS</span>
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setActiveTab("tournaments");
+              setViewingUser(null);
+              setNavMenuOpen(false);
+            }}
+            style={{ ...styles.tabBtn, ...(activeTab === "tournaments" ? styles.tabBtnActive : {}) }}
+          >
+            <Trophy size={14} /> Турниры
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 16, position: "relative", zIndex: 1 }}>
+
+          {!session ? (
+            <button
+              className="nur-btn"
+              style={styles.accentBtnSm}
+              onClick={() => {
+                setActiveTab("profile");
+                setNavMenuOpen(false);
+              }}
+            >
+              <LogIn size={13} /> Войти
+            </button>
+          ) : (
+            <div ref={navAreaRef} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ position: "relative" }}>
+                <div
+                  style={styles.bellBtn}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setNavMenuOpen(false);
+                    setNotifOpen(!notifOpen);
+                  }}
+                >
+                  <Bell
+                    size={16}
+                    color={Object.values(unreadCounts).some((c) => c > 0) ? "#D9414C" : "#AE9B99"}
+                    className={Object.values(unreadCounts).some((c) => c > 0) ? "nur-bell-blink" : ""}
+                  />
+                  {(incomingRequests.length > 0 || teamInvites.length > 0 || Object.values(unreadCounts).some((c) => c > 0)) && (
+                    <span style={styles.notifyDot} />
+                  )}
+                </div>
+                {notifOpen && (
+                  <div style={{ ...styles.navDropdown, width: 280 }}>
+                    <div style={{ position: "relative", zIndex: 1 }}>
+                      {Object.entries(unreadCounts).some(([, c]) => c > 0) && (
+                        <>
+                          <div style={{ padding: "2px 4px 8px", color: "#8C7876", fontSize: 11 }}>Сообщения</div>
+                          {Object.entries(unreadCounts)
+                            .filter(([, c]) => c > 0)
+                            .map(([senderId, count]) => {
+                              const sender = friends.find((f) => f.id === senderId);
+                              if (!sender) return null;
+                              return (
+                                <div
+                                  key={senderId}
+                                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer" }}
+                                  onClick={() => {
+                                    setNotifOpen(false);
+                                    openChat(sender);
+                                  }}
+                                >
+                                  <div style={styles.avatarWrapSm}>
+                                    {sender.avatar_url ? (
+                                      <img src={sender.avatar_url} alt="" style={styles.avatarImgSm} />
+                                    ) : (
+                                      <div style={styles.avatarFallbackSm}>{(sender.username || "?")[0].toUpperCase()}</div>
+                                    )}
+                                  </div>
+                                  <span style={{ flex: 1, fontSize: 12.5, color: "#F3ECEA" }}>{sender.username}</span>
+                                  <span style={{ background: "#D9414C", color: "#fff", fontSize: 10.5, borderRadius: 9, padding: "1px 7px" }}>{count}</span>
+                                </div>
+                              );
+                            })}
+                          <div style={{ height: 1, background: "#3D2226", margin: "8px 0" }} />
+                        </>
+                      )}
+                      <div style={{ padding: "2px 4px 8px", color: "#8C7876", fontSize: 11 }}>Заявки в друзья</div>
+                      {incomingRequests.length === 0 && <div style={{ ...styles.hint, padding: "4px 4px 6px" }}>Новых заявок нет.</div>}
+                      {incomingRequests.map((r) => (
+                        <div key={r.requestId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px" }}>
+                          <div style={styles.avatarWrapSm}>
+                            {r.avatar_url ? (
+                              <img src={r.avatar_url} alt="" style={styles.avatarImgSm} />
+                            ) : (
+                              <div style={styles.avatarFallbackSm}>{(r.username || "?")[0].toUpperCase()}</div>
+                            )}
+                          </div>
+                          <span style={{ flex: 1, fontSize: 12.5, color: "#F3ECEA" }}>{r.username}</span>
+                          <button
+                            style={styles.iconBtn}
+                            onClick={() => {
+                              acceptFriendRequest(r.requestId);
+                            }}
+                          >
+                            <Check size={13} color="#6FBF73" />
+                          </button>
+                          <button
+                            style={styles.iconBtn}
+                            onClick={() => {
+                              removeFriend(r.requestId);
+                            }}
+                          >
+                            <X size={13} color="#FF5A5A" />
+                          </button>
+                        </div>
+                      ))}
+
+                      <div style={{ height: 1, background: "#3D2226", margin: "8px 0" }} />
+                      <div style={{ padding: "2px 4px 8px", color: "#8C7876", fontSize: 11 }}>Приглашения в команды</div>
+                      {teamInvites.length === 0 && <div style={{ ...styles.hint, padding: "4px 4px 6px" }}>Новых приглашений нет.</div>}
+                      {teamInvites.map((inv) => (
+                        <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px" }}>
+                          <ShieldPlus size={15} color="#E8A33D" />
+                          <span style={{ flex: 1, fontSize: 12.5, color: "#F3ECEA" }}>{teamLabel(inv.team)}</span>
+                          <button style={styles.iconBtn} onClick={() => acceptTeamInvite(inv)}>
+                            <Check size={13} color="#6FBF73" />
+                          </button>
+                          <button style={styles.iconBtn} onClick={() => declineTeamInvite(inv.id)}>
+                            <X size={13} color="#FF5A5A" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ position: "relative" }}>
+                <div
+                  style={styles.avatarPill}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setNotifOpen(false);
+                    setNavMenuOpen(!navMenuOpen);
+                  }}
+                >
+                  <div style={styles.avatarWrapPill}>
+                    {profile?.avatar_url ? (
+                      <img src={profile.avatar_url} alt="" style={styles.avatarImgPill} />
+                    ) : (
+                      <div style={styles.avatarFallbackPill}>{(currentUsername || "?")[0].toUpperCase()}</div>
+                    )}
+                  </div>
+                  <span style={{ fontSize: 12.5, color: "#F3ECEA" }}>{currentUsername}</span>
+                  <ChevronDown
+                    size={13}
+                    color="#AE9B99"
+                    style={{
+                      transform: navMenuOpen ? "rotate(0deg)" : "rotate(180deg)",
+                      transition: "transform 0.25s ease",
+                    }}
+                  />
+                </div>
+
+              {navMenuOpen && (
+                <div style={styles.navDropdown}>
+                  <div className="nur-menu-smoke" />
+                  <div style={{ position: "relative", zIndex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "4px 6px 12px" }}>
+                      <div style={styles.avatarWrapMenu}>
+                        {profile?.avatar_url ? (
+                          <img src={profile.avatar_url} alt="" style={styles.avatarImgMenu} />
+                        ) : (
+                          <div style={styles.avatarFallbackMenu}>{(currentUsername || "?")[0].toUpperCase()}</div>
+                        )}
+                      </div>
+                      <div>
+                        <div style={{ color: "#F3ECEA", fontWeight: 700, fontSize: 14.5 }}>{currentUsername}</div>
+                        <div style={{ color: "#AE9B99", fontSize: 11 }}>
+                          {teams.filter((t) => t.owner_id === session.user.id).length} команд
+                          {incomingRequests.length > 0 ? ` · ${incomingRequests.length} заявка в друзья` : ""}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, padding: "0 6px 10px" }}>
+                      <button
+                        className="nur-btn"
+                        style={{ ...styles.accentBtnSm, flex: 1, justifyContent: "center" }}
+                        onClick={() => {
+                          setActiveTab("teams");
+                          openCreateTeam();
+                          setNavMenuOpen(false);
+                        }}
+                      >
+                        <ShieldPlus size={13} /> Создать команду
+                      </button>
+                      <button
+                        className="nur-btn"
+                        style={{ ...styles.ghostBtnSm, flex: 1, justifyContent: "center" }}
+                        onClick={() => {
+                          setActiveTab("profile");
+                          setNavMenuOpen(false);
+                        }}
+                      >
+                        <UserIcon size={13} /> Профиль
+                      </button>
+                    </div>
+
+                    <div style={{ height: 1, background: "#3D2226", margin: "0 6px 8px" }} />
+
+                    <div style={{ padding: "0 6px 4px", color: "#8C7876", fontSize: 11 }}>Друзья</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 6px", maxHeight: 160, overflowY: "auto" }}>
+                      {friends.length === 0 && <span style={{ ...styles.hint, padding: "4px 0" }}>Пока никого не добавили.</span>}
+                      {friends.slice(0, 6).map((f) => (
+                        <div key={f.requestId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 4px" }}>
+                          <div
+                            style={{ ...styles.avatarWrapSm, cursor: "pointer" }}
+                            onClick={() => {
+                              setNavMenuOpen(false);
+                              openUserProfile(f);
+                            }}
+                          >
+                            {f.avatar_url ? (
+                              <img src={f.avatar_url} alt="" style={styles.avatarImgSm} />
+                            ) : (
+                              <div style={styles.avatarFallbackSm}>{(f.username || "?")[0].toUpperCase()}</div>
+                            )}
+                          </div>
+                          <span
+                            style={{ color: "#F3ECEA", fontSize: 12.5, flex: 1, cursor: "pointer", userSelect: "none" }}
+                            onClick={() => {
+                              setNavMenuOpen(false);
+                              openUserProfile(f);
+                            }}
+                          >
+                            {f.username}
+                          </span>
+                          <div style={{ position: "relative", cursor: "pointer" }} onClick={() => openChat(f)}>
+                            <MessageCircle size={15} color="#E8A33D" />
+                            {unreadCounts[f.id] > 0 && <span style={styles.notifyDot} />}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ height: 1, background: "#3D2226", margin: "10px 6px 6px" }} />
+
+                    {(profile?.is_admin || profile?.is_moderator) && (
+                      <button
+                        style={styles.navDropdownItem}
+                        onClick={() => {
+                          setActiveTab("support");
+                          setViewingUser(null);
+                          refreshSupportTickets();
+                          refreshSupportArchive();
+                          setNavMenuOpen(false);
+                        }}
+                      >
+                        <LifeBuoy size={15} color="#D9414C" /> Поддержка
+                      </button>
+                    )}
+                    {profile?.is_admin && (
+                      <button
+                        style={styles.navDropdownItem}
+                        onClick={() => {
+                          setActiveTab("admin");
+                          setNavMenuOpen(false);
+                        }}
+                      >
+                        <Settings size={15} color="#D9414C" /> Админ-панель
+                      </button>
+                    )}
+                    <button
+                      style={{ ...styles.navDropdownItem, color: "#AE9B99" }}
+                      onClick={() => {
+                        doLogout();
+                        setNavMenuOpen(false);
+                      }}
+                    >
+                      <LogOut size={15} /> Выйти
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <a href="https://t.me/tourNUR" target="_blank" rel="noopener noreferrer" style={styles.promoBanner}>
+        <img src={promoImg} alt="NUR FAST CUP" style={styles.promoImg} />
+        <div style={styles.promoText}>
+          <div style={styles.promoTitle}>
+            <Megaphone size={14} color="#D9414C" /> Актуальный турнир анонсирован в Telegram
+          </div>
+          <div style={styles.promoSub}>Все новости, объявления и регистрация команд — в канале. Нажми, чтобы перейти →</div>
+        </div>
+      </a>
+
+      <div style={styles.body}>
+        {errorMsg && (
+          <div style={styles.errorNote}>
+            <ShieldAlert size={13} /> {errorMsg}
+          </div>
+        )}
+
+        {!viewingUser && (
+        <>
+        {activeTab === "tournaments" && (
+          <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ ...styles.stack, flex: "0 1 260px", minWidth: 240 }}>
+            <div style={styles.sectionHead}>
+              <Trophy size={16} color="#D9414C" />
+              <span style={styles.sectionTitle}>ТОП КОМАНД</span>
+            </div>
+            <div className="nur-mode-card" style={{ ...styles.card, position: "relative", overflow: "hidden" }}>
+              <ModeToggle value={leaderboardMode} onChange={setLeaderboardMode} />
+              {(() => {
+                const board = leaderboardMode === "5x5" ? leaderboard5x5 : leaderboard2x2;
+                return board.length === 0 ? (
+                  <div style={{ ...styles.hint, marginTop: 12 }}>Пока нет завершённых матчей.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 14 }}>
+                    {board.map((t, i) => (
+                      <div key={t.id} style={styles.leaderRow}>
+                        <span style={{ ...styles.leaderRank, color: i === 0 ? "#D9414C" : "#AE9B99" }}>
+                          {i === 0 ? <Trophy size={13} /> : `#${i + 1}`}
+                        </span>
+                        <span style={styles.leaderName}>{t.name}</span>
+                        <span style={styles.leaderStat}>{t.wins} побед</span>
+                        {t.titles > 0 && <span style={styles.leaderStat}>{t.titles} 🏆</span>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          <div style={{ ...styles.stack, flex: "1 1 480px", minWidth: 0 }}>
+            <div style={styles.sectionHead}>
+              <Swords size={16} color="#D9414C" />
+              <span style={styles.sectionTitle}>ТУРНИРЫ</span>
+            </div>
+
+            {tourList.length === 0 && <div style={styles.emptyState}>Турниров пока нет. Загляните позже.</div>}
+
+            {tourList.map((tour) => {
+              const registeredIds = (tour.tournament_teams || []).map((tt) => tt.team_id);
+              const registeredTeams = registeredIds.map((id) => teamMap[id]).filter(Boolean);
+              const eligibleTeams = session
+                ? teams.filter((t) => t.mode === tour.mode && t.owner_id === session.user.id && !registeredIds.includes(t.id))
+                : [];
+              const isExpanded = expandedTour === tour.id;
+              const finalRound = isExpanded && expandedRounds ? expandedRounds[expandedRounds.length - 1] : null;
+              const champion = tour.status === "finished" && finalRound && finalRound[0] ? teamMap[finalRound[0].winner_id] : null;
+
+              return (
+                <div key={tour.id} style={{ ...styles.card, padding: tour.banner_url ? 0 : 18, overflow: "hidden" }}>
+                  {tour.banner_url && <img src={tour.banner_url} alt={tour.name} style={styles.tourBanner} />}
+                  <div style={{ padding: tour.banner_url ? 18 : 0 }}>
+                    <div style={styles.cardHeadRow}>
+                      <div>
+                        <div
+                          style={{ ...styles.cardTitle, cursor: tour.status !== "registration" ? "pointer" : "default" }}
+                          onClick={() => tour.status !== "registration" && toggleExpand(tour.id, true)}
+                        >
+                          {tour.name} <span style={{ color: "#E8A33D", fontSize: 11.5, fontFamily: "'JetBrains Mono', monospace" }}>· {MODE_LABEL[tour.mode]}</span>
+                        </div>
+                        <div style={styles.cardMeta}>
+                          {registeredTeams.length}
+                          {tour.max_teams ? ` / ${tour.max_teams}` : ""} команд зарегистрировано
+                        </div>
+                      </div>
+                      <span style={{ ...styles.badge, color: STATUS_COLOR[tour.status], borderColor: STATUS_COLOR[tour.status] + "66" }}>
+                        {STATUS_LABEL[tour.status]}
+                      </span>
+                    </div>
+
+                    {tour.prize_pool && (
+                      <div style={styles.prizeRow}>
+                        <Trophy size={13} color="#D9414C" /> {tour.prize_pool}
+                      </div>
+                    )}
+
+                    {(tour.announce_at || tour.reg_open_at || tour.start_at) && (
+                      <div style={styles.scheduleRow}>
+                        {tour.announce_at && <span>Анонс: {formatDateTime(tour.announce_at)}</span>}
+                        {tour.reg_open_at && <span>Регистрация: {formatDateTime(tour.reg_open_at)}</span>}
+                        {tour.start_at && <span>Старт: {formatDateTime(tour.start_at)}</span>}
+                      </div>
+                    )}
+
+                    {registeredTeams.length > 0 && (
+                      <>
+                        <button
+                          className="nur-btn"
+                          style={{ ...styles.ghostBtnSm, marginTop: 10 }}
+                          onClick={() => setShowTeamsTour(showTeamsTour === tour.id ? null : tour.id)}
+                        >
+                          {showTeamsTour === tour.id ? "Скрыть команды" : "Показать команды"}
+                        </button>
+                        {showTeamsTour === tour.id && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                            {registeredTeams.map((t) => (
+                              <div key={t.id}>
+                                <span
+                                  style={{ ...styles.memberChip, cursor: "pointer" }}
+                                  onClick={() => setExpandedTeamId(expandedTeamId === t.id ? null : t.id)}
+                                >
+                                  {teamLabel(t)}
+                                </span>
+                                {expandedTeamId === t.id && (
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, paddingLeft: 12 }}>
+                                    {(t.team_members || []).map((m, i) => (
+                                      <span key={i} style={{ ...styles.memberChip, color: "#AE9B99" }}>
+                                        {m.member_name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {champion && (
+                      <div style={styles.championBanner}>
+                        <Trophy size={15} color="#D9414C" />
+                        Победитель: <b style={{ color: "#D9414C" }}>{teamLabel(champion)}</b>
+                      </div>
+                    )}
+
+                    {tour.status === "registration" && (
+                      <div style={styles.regRow}>
+                        {!session && <span style={styles.hint}>Войдите в профиль, чтобы зарегистрировать команду.</span>}
+                        {session &&
+                          (() => {
+                            const myRegisteredTeam = teams.find(
+                              (t) => t.mode === tour.mode && t.owner_id === session.user.id && registeredIds.includes(t.id)
+                            );
+                            if (myRegisteredTeam) {
+                              return (
+                                <>
+                                  <span style={styles.hint}>Команда «{myRegisteredTeam.name}» зарегистрирована.</span>
+                                  <button
+                                    className="nur-btn"
+                                    style={{ ...styles.ghostBtnSm, borderColor: "#FF5A5A", color: "#FF5A5A" }}
+                                    onClick={() => unregisterTeam(tour.id, myRegisteredTeam.id)}
+                                  >
+                                    Отменить регистрацию
+                                  </button>
+                                </>
+                              );
+                            }
+                            return null;
+                          })()}
+                      {session && eligibleTeams.length === 0 && !teams.some((t) => t.mode === tour.mode && t.owner_id === session.user.id && registeredIds.includes(t.id)) && (
+                        <span style={styles.hint}>
+                          У вас нет свободной команды режима {MODE_LABEL[tour.mode]}. Создайте её во вкладке «Команды».
+                        </span>
+                      )}
+                      {session && eligibleTeams.length > 0 && (
+                        <>
+                          <select
+                            value={regSelections[tour.id] || eligibleTeams[0].id}
+                            onChange={(e) => setRegSelections({ ...regSelections, [tour.id]: e.target.value })}
+                            style={styles.select}
+                          >
+                            {eligibleTeams.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="nur-btn"
+                            style={styles.accentBtnSm}
+                            onClick={() => registerTeam(tour.id, regSelections[tour.id] || eligibleTeams[0].id)}
+                          >
+                            Зарегистрировать
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {tour.status !== "registration" && (
+                    <button className="nur-btn" style={{ ...styles.ghostBtnSm, marginTop: 12 }} onClick={() => toggleExpand(tour.id, true)}>
+                      Показать сетку
+                    </button>
+                  )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: "0 1 240px", minWidth: 220 }}>
+            {ads.map((ad) =>
+              ad.is_active && ad.image_url && (!ad.expires_at || new Date(ad.expires_at) > new Date()) ? (
+                <a key={ad.id} href={ad.link_url || "#"} target="_blank" rel="noopener noreferrer" style={styles.adSlotFilled}>
+                  <img src={ad.image_url} alt="Реклама" style={styles.adSlotImg} />
+                </a>
+              ) : (
+                <a key={ad.id} href="https://t.me/tourNUR" target="_blank" rel="noopener noreferrer" style={styles.adSlotEmpty}>
+                  <Megaphone size={18} color="#8C7876" />
+                  <div style={{ fontSize: 12, color: "#AE9B99", textAlign: "center", marginTop: 8 }}>Тут могла быть ваша реклама</div>
+                  <div style={{ fontSize: 11, color: "#E8A33D", textAlign: "center", marginTop: 6 }}>Место продаётся — пишите: @tourNUR</div>
+                </a>
+              )
+            )}
+          </div>
+          </div>
+        )}
+
+        {activeTab === "teams" && (
+          <div style={styles.stack}>
+            <div style={styles.sectionHead}>
+              <Users size={16} color="#D9414C" />
+              <span style={styles.sectionTitle}>МОИ КОМАНДЫ</span>
+            </div>
+
+            {!session && <div style={styles.emptyState}>Войдите в профиль, чтобы создавать команды.</div>}
+
+            {session && (
+              <>
+                {!showCreateTeam ? (
+                  <button className="nur-btn" style={styles.accentBtn} onClick={openCreateTeam}>
+                    <Plus size={14} /> Создать команду
+                  </button>
+                ) : (
+                  <div className="nur-mode-card" style={{ ...styles.card, position: "relative", overflow: "hidden" }}>
+                    <div style={styles.cardHeadRow}>
+                      <div style={styles.cardTitle}>Новая команда</div>
+                      <button style={styles.iconBtn} onClick={() => setShowCreateTeam(false)}>
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div style={{ ...styles.hint, marginTop: 12, marginBottom: 6 }}>Режим команды:</div>
+                    <ModeToggle value={createTeamMode} onChange={setCreateTeamMode} />
+
+                    {!profile?.is_admin && myTeams(createTeamMode).length >= 1 ? (
+                      <div style={{ ...styles.hint, marginTop: 12, color: "#FF5A5A" }}>
+                        У вас уже есть команда в режиме {MODE_LABEL[createTeamMode]} — обычным пользователям доступна только одна команда на режим.
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                          <input className="nur-in" placeholder="Название команды" value={teamName} onChange={(e) => setTeamName(e.target.value)} style={{ ...styles.input, flex: 1 }} />
+                          <input className="nur-in" placeholder="Тег" value={teamTag} maxLength={5} onChange={(e) => setTeamTag(e.target.value)} style={{ ...styles.input, width: 80 }} />
+                        </div>
+                        <div style={{ marginTop: 10, fontSize: 12, color: "#8C7876" }}>
+                          Капитан: {currentUsername}. Остальных игроков можно пригласить после создания команды — приглашённый должен принять запрос.
+                        </div>
+                        <button className="nur-btn" style={{ ...styles.accentBtn, marginTop: 14 }} onClick={createTeam} disabled={!teamName.trim()}>
+                          Создать команду
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {teams.filter((t) => t.owner_id === session.user.id).length === 0 && (
+                  <div style={styles.emptyState}>Команд пока нет.</div>
+                )}
+                {teams
+                  .filter((t) => t.owner_id === session.user.id)
+                  .map((t) => (
+                  <div key={t.id} style={styles.card}>
+                    <div style={styles.cardHeadRow}>
+                      <div style={styles.cardTitle}>
+                        {t.tag && <span style={{ color: "#D9414C" }}>[{t.tag}] </span>}
+                        {t.name} <span style={{ color: "#E8A33D", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>· {MODE_LABEL[t.mode]}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={styles.badge}>
+                          {(t.team_members || []).length}/{t.max_size}
+                        </span>
+                        <button style={styles.iconBtn} onClick={() => setConfirmDeleteTeamId(t.id === confirmDeleteTeamId ? null : t.id)}>
+                          <Trash2 size={14} color="#FF5A5A" />
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                      {(t.team_members || []).map((m, i) => (
+                        <span key={i} style={styles.memberChip}>
+                          {m.member_name}
+                        </span>
+                      ))}
+                    </div>
+                    {(t.team_members || []).length < t.max_size && (
+                      <div style={{ position: "relative", marginTop: 10 }}>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <input
+                            className="nur-in"
+                            placeholder="Никнейм тиммейта, чтобы пригласить"
+                            value={addMemberQuery[t.id] || ""}
+                            onChange={(e) => {
+                              setAddMemberQuery((prev) => ({ ...prev, [t.id]: e.target.value }));
+                              searchTeammate(t.id, e.target.value);
+                            }}
+                            style={{ ...styles.input, flex: 1 }}
+                          />
+                        </div>
+                        {(addMemberResults[t.id] || []).length > 0 && (
+                          <div style={styles.suggestBox}>
+                            {addMemberResults[t.id].map((p) => (
+                              <div key={p.id} style={{ ...styles.suggestItem, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <span>{p.username}</span>
+                                <button className="nur-btn" style={styles.accentBtnSm} onClick={() => inviteToTeam(t, p)}>
+                                  <Plus size={12} /> Пригласить
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {confirmDeleteTeamId === t.id && (
+                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <button style={{ ...styles.ghostBtnSm, borderColor: "#FF5A5A", color: "#FF5A5A" }} onClick={() => deleteTeam(t.id)}>
+                          Подтвердить удаление
+                        </button>
+                        <button style={styles.ghostBtnSm} onClick={() => setConfirmDeleteTeamId(null)}>
+                          Отмена
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === "profile" && (
+          <div style={{ ...styles.stack, maxWidth: 380 }}>
+            <div style={styles.sectionHead}>
+              <ShieldCheck size={16} color="#D9414C" />
+              <span style={styles.sectionTitle}>ПРОФИЛЬ</span>
+            </div>
+
+            {session ? (
+              <>
+                <div style={{ ...styles.card, padding: 0, overflow: "hidden" }}>
+                  <div style={{ ...styles.profileBannerBase, height: 96 }}>
+                    {profile?.banner_url && <img src={profile.banner_url} alt="" style={styles.profileBannerImg} />}
+                  </div>
+                  <div style={{ padding: "0 18px 18px" }}>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginTop: -18 }}>
+                      <div style={{ ...styles.avatarWrap, width: 68, height: 68, border: "3px solid #150F10", borderRadius: "50%", background: "#150F10", position: "relative", zIndex: 2 }}>
+                        {profile?.avatar_url ? (
+                          <img src={profile.avatar_url} alt="" style={{ ...styles.avatarImg, width: 62, height: 62 }} />
+                        ) : (
+                          <div style={{ ...styles.avatarFallback, width: 62, height: 62 }}>{(currentUsername || "?")[0].toUpperCase()}</div>
+                        )}
+                      </div>
+                      <div style={{ paddingBottom: 4 }}>
+                        <div style={styles.cardTitle}>{currentUsername || session.user.email}</div>
+                        <div style={styles.cardMeta}>Команд: {teams.filter((t) => t.owner_id === session.user.id).length}</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div>
+                        <div style={{ ...styles.hint, marginBottom: 6 }}>Аватар:</div>
+                        <FileChooser
+                          disabled={avatarUploading}
+                          uploadingLabel="Загружаем…"
+                          onChange={(e) => uploadAvatar(e.target.files?.[0])}
+                        />
+                      </div>
+                      <div>
+                        <div style={{ ...styles.hint, marginBottom: 6 }}>Баннер профиля:</div>
+                        <FileChooser
+                          disabled={bannerUploading}
+                          uploadingLabel="Загружаем…"
+                          onChange={(e) => uploadBanner(e.target.files?.[0])}
+                        />
+                      </div>
+                      <div>
+                        <div style={{ ...styles.hint, marginBottom: 6 }}>О себе:</div>
+                        <textarea
+                          className="nur-in"
+                          value={bioDraft}
+                          onChange={(e) => setBioDraft(e.target.value.slice(0, 300))}
+                          onKeyDown={playTypeSound}
+                          placeholder="Расскажите немного о себе…"
+                          rows={3}
+                          style={{ ...styles.input, width: "100%", resize: "vertical", fontFamily: "'Inter', sans-serif" }}
+                        />
+                        <button
+                          className="nur-btn"
+                          style={{ ...styles.ghostBtnSm, marginTop: 8 }}
+                          disabled={bioSaving || bioDraft === (profile?.bio || "")}
+                          onClick={saveBio}
+                        >
+                          {bioSaving ? "Сохраняем…" : "Сохранить описание"}
+                        </button>
+                      </div>
+                    </div>
+                    {profile?.is_admin && <div style={{ ...styles.hint, marginTop: 10 }}>Статус: администратор</div>}
+                    <button
+                      className="nur-btn"
+                      style={{ ...styles.ghostBtnSm, marginTop: 10, borderColor: profile?.is_closed ? "#FF5A5A" : "#3D2226", color: profile?.is_closed ? "#FF5A5A" : "#AE9B99" }}
+                      onClick={() => toggleClosedProfile({ id: session.user.id, is_closed: profile?.is_closed })}
+                    >
+                      <ShieldAlert size={13} /> {profile?.is_closed ? "Анкета закрыта — открыть" : "Закрыть анкету"}
+                    </button>
+                    <button className="nur-btn" style={{ ...styles.ghostBtnSm, marginTop: 10 }} onClick={doLogout}>
+                      <LogOut size={13} /> Выйти
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ ...styles.card, userSelect: "none" }}>
+                  <div
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+                    onClick={() => setSoundsCardOpen((v) => !v)}
+                  >
+                    <div style={styles.cardTitle}>Звуки</div>
+                    <ChevronDown
+                      size={16}
+                      color="#AE9B99"
+                      style={{ transform: soundsCardOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.25s ease" }}
+                    />
+                  </div>
+
+                  {soundsCardOpen && (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                        <span style={{ fontSize: 12.5, color: "#AE9B99" }}>Звук при печати текста</span>
+                        <div
+                          onClick={toggleTypeSound}
+                          style={{
+                            width: 46,
+                            height: 26,
+                            borderRadius: 13,
+                            background: typeSoundOn ? "#D9414C" : "#2E1B1E",
+                            border: "1px solid #3D2226",
+                            cursor: "pointer",
+                            position: "relative",
+                            transition: "background 0.2s ease",
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 2,
+                              left: typeSoundOn ? 22 : 2,
+                              width: 20,
+                              height: 20,
+                              borderRadius: "50%",
+                              background: "#F3ECEA",
+                              transition: "left 0.2s ease",
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 14 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                          <span style={{ fontSize: 12.5, color: "#AE9B99" }}>Громкость</span>
+                          <span style={{ fontSize: 11.5, color: "#7A6668" }}>{Math.round(soundVolume * 100)}%</span>
+                        </div>
+                        <div style={{ position: "relative", height: 24, display: "flex", alignItems: "center", overflow: "hidden", borderRadius: 6 }}>
+                          <div className="nur-menu-smoke" style={{ opacity: 0.6 }} />
+                          <input
+                            className="nur-volume-slider"
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                            value={soundVolume}
+                            onChange={(e) => changeSoundVolume(parseFloat(e.target.value))}
+                            style={{ position: "relative", zIndex: 1 }}
+                          />
+                        </div>
+                      </div>
+
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#AE9B99", cursor: "pointer", marginTop: 14 }}>
+                        <input type="checkbox" checked={skipBackspaceSound} onChange={toggleSkipBackspaceSound} />
+                        Без звука на стирание
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#AE9B99", cursor: "pointer", marginTop: 8 }}>
+                        <input type="checkbox" checked={skipSpaceSound} onChange={toggleSkipSpaceSound} />
+                        Без звука на пробел
+                      </label>
+
+                      <div style={{ ...styles.hint, marginTop: 14, marginBottom: 8 }}>Выберите звук (клик проигрывает пример):</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {SOUND_PRESETS.map((p) => (
+                          <button
+                            key={p.id}
+                            className="nur-btn"
+                            style={
+                              soundPresetId === p.id
+                                ? { ...styles.accentBtnSm, fontSize: 12 }
+                                : { ...styles.ghostBtnSm, fontSize: 12 }
+                            }
+                            onClick={() => selectSoundPreset(p.id)}
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{ ...styles.hint, marginTop: 14, marginBottom: 6 }}>Проверить, как звучит при печати:</div>
+                      <input
+                        className="nur-in"
+                        placeholder="Печатайте здесь для проверки…"
+                        onKeyDown={playTypeSound}
+                        style={{ ...styles.input, width: "100%" }}
+                      />
+                      <div style={{ fontSize: 11, color: "#5A4548", marginTop: 16, textAlign: "center" }}>
+                        Есть идеи, какой звук добавить? Пишите: @quqububu
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div style={styles.card}>
+                  <div style={styles.cardTitle}>Друзья ({friends.length})</div>
+
+                  {incomingRequests.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ ...styles.hint, marginBottom: 6 }}>Заявки в друзья:</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {incomingRequests.map((r) => (
+                          <div key={r.requestId} style={styles.friendRow}>
+                            <div style={{ ...styles.avatarWrapSm, cursor: "pointer" }} onClick={() => openUserProfile(r)}>
+                              {r.avatar_url ? (
+                                <img src={r.avatar_url} alt="" style={styles.avatarImgSm} />
+                              ) : (
+                                <div style={styles.avatarFallbackSm}>{(r.username || "?")[0].toUpperCase()}</div>
+                              )}
+                            </div>
+                            <span style={{ flex: 1, fontSize: 13.5, cursor: "pointer", userSelect: "none" }} onClick={() => openUserProfile(r)}>
+                              {r.username}
+                            </span>
+                            <button style={styles.iconBtn} onClick={() => acceptFriendRequest(r.requestId)}>
+                              <Check size={13} color="#6FBF73" />
+                            </button>
+                            <button style={styles.iconBtn} onClick={() => removeFriend(r.requestId)}>
+                              <X size={13} color="#FF5A5A" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {sentPendingRequests.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ ...styles.hint, marginBottom: 6 }}>Отправленные заявки (ожидают ответа):</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {sentPendingRequests.map((r) => (
+                          <div key={r.requestId} style={styles.friendRow}>
+                            <div style={{ ...styles.avatarWrapSm, cursor: "pointer" }} onClick={() => openUserProfile(r)}>
+                              {r.avatar_url ? (
+                                <img src={r.avatar_url} alt="" style={styles.avatarImgSm} />
+                              ) : (
+                                <div style={styles.avatarFallbackSm}>{(r.username || "?")[0].toUpperCase()}</div>
+                              )}
+                            </div>
+                            <span style={{ flex: 1, fontSize: 13.5, cursor: "pointer", userSelect: "none" }} onClick={() => openUserProfile(r)}>
+                              {r.username}
+                            </span>
+                            <button style={styles.iconBtn} onClick={() => removeFriend(r.requestId)}>
+                              <X size={13} color="#FF5A5A" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+                    {friends.length === 0 && <span style={styles.hint}>Пока никого не добавили.</span>}
+                    {friends.map((f) => (
+                      <div key={f.requestId} style={styles.friendRow}>
+                        <div style={{ ...styles.avatarWrapSm, cursor: "pointer" }} onClick={() => openUserProfile(f)}>
+                          {f.avatar_url ? (
+                            <img src={f.avatar_url} alt="" style={styles.avatarImgSm} />
+                          ) : (
+                            <div style={styles.avatarFallbackSm}>{(f.username || "?")[0].toUpperCase()}</div>
+                          )}
+                        </div>
+                        <span style={{ flex: 1, fontSize: 13.5, cursor: "pointer", userSelect: "none" }} onClick={() => openUserProfile(f)}>
+                          {f.username}
+                        </span>
+                        <button
+                          style={{ ...styles.iconBtn, position: "relative" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openChat(f);
+                          }}
+                        >
+                          <MessageCircle size={14} color="#E8A33D" />
+                          {unreadCounts[f.id] > 0 && <span style={styles.notifyDot} />}
+                        </button>
+                        <button
+                          style={styles.iconBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFriend(f.requestId);
+                          }}
+                        >
+                          <X size={13} color="#FF5A5A" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ position: "relative", marginTop: 12 }}>
+                    <input
+                      className="nur-in"
+                      placeholder="Никнейм, чтобы отправить заявку в друзья"
+                      value={friendQuery}
+                      onChange={(e) => {
+                        setFriendQuery(e.target.value);
+                        searchFriendCandidates(e.target.value);
+                      }}
+                      style={styles.input}
+                    />
+                    {friendResults.length > 0 && (
+                      <div style={styles.suggestBox}>
+                        {friendResults.map((p) => (
+                          <div key={p.id} style={{ ...styles.suggestItem, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span>{p.username}</span>
+                            {sentPendingIds.includes(p.id) ? (
+                              <span style={{ ...styles.hint, fontSize: 11 }}>Заявка отправлена</span>
+                            ) : (
+                              <button className="nur-btn" style={styles.accentBtnSm} onClick={() => sendFriendRequest(p.id)}>
+                                <UserPlus size={12} /> Добавить
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div style={styles.card}>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  <button
+                    style={{ ...styles.segBtn, ...(authScreen === "login" ? styles.segBtnActive : {}) }}
+                    onClick={() => { setAuthScreen("login"); setErrorMsg(""); }}
+                  >
+                    Вход
+                  </button>
+                  <button
+                    style={{ ...styles.segBtn, ...(authScreen === "register" ? styles.segBtnActive : {}) }}
+                    onClick={() => { setAuthScreen("register"); setErrorMsg(""); }}
+                  >
+                    Регистрация
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {authScreen === "register" && (
+                    <input className="nur-in" placeholder="Никнейм" value={username} onChange={(e) => setUsername(e.target.value)} style={styles.input} />
+                  )}
+                  <input className="nur-in" placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={styles.input} />
+                  <input
+                    className="nur-in"
+                    placeholder="Пароль"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && (authScreen === "login" ? doLogin() : doRegister())}
+                    style={styles.input}
+                  />
+                  <button className="nur-btn" style={styles.accentBtn} onClick={authScreen === "login" ? doLogin : doRegister}>
+                    {authScreen === "login" ? "Войти" : "Зарегистрироваться"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "admin" && (
+          <div style={styles.stack}>
+            <div style={styles.sectionHead}>
+              <Settings size={16} color="#D9414C" />
+              <span style={styles.sectionTitle}>АДМИН-ПАНЕЛЬ</span>
+            </div>
+
+            {!session && <div style={styles.emptyState}>Войдите в профиль, чтобы получить доступ.</div>}
+            {session && !profile?.is_admin && !profile?.is_moderator && (
+              <div style={styles.emptyState}>
+                У вашего аккаунта нет прав администратора или модератора. Их выдаёт владелец сайта (администратор может выдать статус модератора прямо со страницы профиля игрока).
+              </div>
+            )}
+
+            {session && (profile?.is_admin || profile?.is_moderator) && (
+              <>
+                {profile?.is_admin && (
+                <div style={styles.card}>
+                  <div style={styles.cardTitle}>Реклама (боковые слоты на «Турниры»)</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 12 }}>
+                    {ads.map((ad) => (
+                      <div key={ad.id} style={{ border: "1px solid #3D2226", borderRadius: 8, padding: 12 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ color: "#F3ECEA", fontSize: 13, fontWeight: 600 }}>Слот {ad.slot}</span>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#AE9B99", cursor: "pointer" }}>
+                            <input type="checkbox" checked={ad.is_active} onChange={() => toggleAdActive(ad)} />
+                            Показывать
+                          </label>
+                        </div>
+                        {ad.image_url && <img src={ad.image_url} alt="" style={{ width: "100%", maxWidth: 200, marginTop: 8, borderRadius: 6 }} />}
+                        {ad.expires_at && (
+                          <div style={{ ...styles.hint, marginTop: 6 }}>
+                            Истекает: {formatDateTime(ad.expires_at)}
+                            {new Date(ad.expires_at) < new Date() && <span style={{ color: "#FF5A5A" }}> — уже истекло</span>}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                          <div style={{ flex: "1 1 160px" }}>
+                            <FileChooser id={`ad-file-${ad.slot}`} />
+                          </div>
+                          <input
+                            className="nur-in"
+                            placeholder="Ссылка (https://...)"
+                            value={adLinkDrafts[ad.slot] !== undefined ? adLinkDrafts[ad.slot] : ad.link_url || ""}
+                            onChange={(e) => setAdLinkDrafts((prev) => ({ ...prev, [ad.slot]: e.target.value }))}
+                            style={{ ...styles.input, flex: "1 1 200px" }}
+                          />
+                        </div>
+                        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ ...styles.hint, marginBottom: 4 }}>Удалить рекламу автоматически (необязательно):</div>
+                            <input
+                              type="datetime-local"
+                              value={
+                                adExpiryDrafts[ad.slot] !== undefined
+                                  ? adExpiryDrafts[ad.slot]
+                                  : ad.expires_at
+                                  ? (() => {
+                                      const d = new Date(ad.expires_at);
+                                      const tzOff = d.getTimezoneOffset() * 60000;
+                                      return new Date(d.getTime() - tzOff).toISOString().slice(0, 16);
+                                    })()
+                                  : ""
+                              }
+                              onChange={(e) => setAdExpiryDrafts((prev) => ({ ...prev, [ad.slot]: e.target.value }))}
+                              style={styles.input}
+                            />
+                          </div>
+                          <button
+                            className="nur-btn"
+                            style={{ ...styles.accentBtnSm, marginTop: 16 }}
+                            disabled={adUploading[ad.slot]}
+                            onClick={() => {
+                              const fileInput = document.getElementById(`ad-file-${ad.slot}`);
+                              saveAdSlot(ad, fileInput?.files?.[0] || null);
+                            }}
+                          >
+                            {adUploading[ad.slot] ? "Сохраняем…" : "Сохранить"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                )}
+
+                {profile?.is_admin && (
+                <div style={styles.card}>
+                  <div style={styles.cardTitle}>Карты (фон на экране бана карт)</div>
+                  <div style={{ ...styles.hint, marginTop: 6, marginBottom: 12 }}>
+                    Необязательно — если фото не загружено, используется красивая заливка по умолчанию. Можно продать это место как рекламу (постер вместо фона карты).
+                  </div>
+                  <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "flex-end", flexWrap: "wrap" }}>
+                    {MAP_POOL.map((mapKey) => (
+                      <div key={mapKey} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                        <div
+                          style={{
+                            position: "relative",
+                            width: 118,
+                            height: 300,
+                            overflow: "hidden",
+                            border: "1px solid #3D2226",
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "flex-end",
+                            transform: "skewX(-7deg)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              position: "absolute",
+                              inset: "-6% -14%",
+                              background: mapImages[mapKey] ? `url(${mapImages[mapKey]}) center/cover` : MAP_GRADIENT[mapKey],
+                            }}
+                          />
+                          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0) 38%, rgba(0,0,0,0.93) 100%)" }} />
+                          <div style={{ position: "relative", padding: "10px 8px 14px", textAlign: "center", transform: "skewX(7deg)" }}>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#E8A33D" }}>
+                              Забанить
+                            </div>
+                            <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 19, letterSpacing: 1, textTransform: "uppercase", marginTop: 3, color: "#fff", textShadow: "0 2px 14px rgba(0,0,0,0.7)" }}>
+                              {MAP_LABEL[mapKey]}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center", width: 130 }}>
+                          <FileChooser id={`map-file-${mapKey}`} label="Фото" />
+                          <button
+                            className="nur-btn"
+                            style={{ ...styles.accentBtnSm, width: "100%", justifyContent: "center" }}
+                            disabled={mapImageUploading[mapKey]}
+                            onClick={() => {
+                              const fileInput = document.getElementById(`map-file-${mapKey}`);
+                              if (fileInput?.files?.[0]) saveMapImage(mapKey, fileInput.files[0]);
+                            }}
+                          >
+                            {mapImageUploading[mapKey] ? "…" : "Сохранить"}
+                          </button>
+                          {mapImages[mapKey] && (
+                            <button
+                              style={{ ...styles.ghostBtnSm, borderColor: "#FF5A5A", color: "#FF5A5A", width: "100%", justifyContent: "center", fontSize: 11 }}
+                              onClick={() => removeMapImage(mapKey)}
+                            >
+                              Сбросить
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                )}
+
+                <div className="nur-mode-card" style={{ ...styles.card, position: "relative", overflow: "hidden" }}>
+                  <div style={styles.cardTitle}>Создать турнир</div>
+                  <div style={{ marginTop: 12 }}>
+                    <ModeToggle value={newTourMode} onChange={setNewTourMode} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <input className="nur-in" placeholder="Название турнира" value={newTourName} onChange={(e) => setNewTourName(e.target.value)} style={{ ...styles.input, flex: 1, minWidth: 180 }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <input
+                      className="nur-in"
+                      placeholder="Призовой фонд (например: 1 место — 450₽, 2 место — 100₽)"
+                      value={newTourPrize}
+                      onChange={(e) => setNewTourPrize(e.target.value)}
+                      style={{ ...styles.input, flex: 1, minWidth: 220 }}
+                    />
+                    <input
+                      className="nur-in"
+                      type="number"
+                      min="2"
+                      placeholder="Лимит команд (необязательно)"
+                      value={newTourMaxTeams}
+                      onChange={(e) => setNewTourMaxTeams(e.target.value)}
+                      style={{ ...styles.input, width: 190 }}
+                    />
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ ...styles.hint, marginBottom: 6 }}>Баннер турнира (необязательно, картинка):</div>
+                    <FileChooser onChange={(e) => setNewTourBannerFile(e.target.files?.[0] || null)} />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ ...styles.hint, marginBottom: 4 }}>Анонс</div>
+                      <input type="datetime-local" value={newTourAnnounceAt} onChange={(e) => setNewTourAnnounceAt(e.target.value)} style={styles.input} />
+                    </div>
+                    <div>
+                      <div style={{ ...styles.hint, marginBottom: 4 }}>Открытие регистрации</div>
+                      <input type="datetime-local" value={newTourRegOpenAt} onChange={(e) => setNewTourRegOpenAt(e.target.value)} style={styles.input} />
+                    </div>
+                    <div>
+                      <div style={{ ...styles.hint, marginBottom: 4 }}>Старт игры</div>
+                      <input type="datetime-local" value={newTourStartAt} onChange={(e) => setNewTourStartAt(e.target.value)} style={styles.input} />
+                    </div>
+                  </div>
+                  <button className="nur-btn" style={{ ...styles.accentBtnSm, marginTop: 12 }} onClick={createTournament} disabled={tourCreating || !newTourName.trim()}>
+                    <Plus size={13} /> {tourCreating ? "Создаём…" : "Создать"}
+                  </button>
+                </div>
+
+                {profile?.is_admin && (
+                <>
+                {tournaments.length === 0 && <div style={styles.emptyState}>Турниров ещё не создано.</div>}
+
+                {tournaments.map((tour) => {
+                  const registeredIds = (tour.tournament_teams || []).map((tt) => tt.team_id);
+                  const registeredTeams = registeredIds.map((id) => teamMap[id]).filter(Boolean);
+                  const isExpanded = expandedTour === tour.id;
+                  return (
+                    <div key={tour.id} style={styles.card}>
+                      <div style={styles.cardHeadRow}>
+                        {tour.banner_url && <img src={tour.banner_url} alt={tour.name} style={styles.tourBannerSm} />}
+                        <div style={{ flex: 1 }}>
+                          <div style={styles.cardTitle}>
+                            {tour.name} <span style={{ color: "#8C7876", fontSize: 12 }}>· {MODE_LABEL[tour.mode]}</span>
+                          </div>
+                          <div style={styles.cardMeta}>
+                            {registeredTeams.length}
+                            {tour.max_teams ? ` / ${tour.max_teams}` : ""} команд · {STATUS_LABEL[tour.status]}
+                          </div>
+                          {tour.prize_pool && (
+                            <div style={{ ...styles.prizeRow, marginTop: 6 }}>
+                              <Trophy size={12} color="#D9414C" /> {tour.prize_pool}
+                            </div>
+                          )}
+                        </div>
+                        <button style={styles.iconBtn} onClick={() => setConfirmDeleteId(tour.id === confirmDeleteId ? null : tour.id)}>
+                          <Trash2 size={14} color="#FF5A5A" />
+                        </button>
+                      </div>
+
+                      {confirmDeleteId === tour.id && (
+                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <button style={{ ...styles.ghostBtnSm, borderColor: "#FF5A5A", color: "#FF5A5A" }} onClick={() => deleteTournament(tour.id)}>
+                            Подтвердить удаление
+                          </button>
+                          <button style={styles.ghostBtnSm} onClick={() => setConfirmDeleteId(null)}>
+                            Отмена
+                          </button>
+                        </div>
+                      )}
+
+                      {registeredTeams.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                          {registeredTeams.map((t) => (
+                            <span key={t.id} style={{ ...styles.memberChip, display: "flex", alignItems: "center", gap: 6 }}>
+                              {teamLabel(t)}
+                              {tour.status === "registration" && (
+                                <X
+                                  size={11}
+                                  color="#FF5A5A"
+                                  style={{ cursor: "pointer" }}
+                                  onClick={() => unregisterTeam(tour.id, t.id)}
+                                />
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                        {tour.status === "registration" && (
+                          <button className="nur-btn" style={styles.accentBtnSm} disabled={registeredTeams.length < 2} onClick={() => generateBracket(tour.id)}>
+                            Сформировать сетку
+                          </button>
+                        )}
+                        {tour.status !== "registration" && (
+                          <button className="nur-btn" style={styles.ghostBtnSm} onClick={() => toggleExpand(tour.id, true)}>
+                            {isExpanded ? "Скрыть сетку" : "Управлять сеткой"}
+                          </button>
+                        )}
+                      </div>
+
+                      {isExpanded && renderBracket(tour.id, expandedRounds, true)}
+                    </div>
+                  );
+                })}
+                </>
+                )}
+
+                <div style={styles.card}>
+                  <div style={styles.cardTitle}>Обращения в поддержку</div>
+                  <div style={{ ...styles.hint, marginTop: 8, marginBottom: 12 }}>
+                    {supportTickets.length > 0 ? `Активных обращений: ${supportTickets.length}` : "Пока никто не писал в поддержку."}
+                  </div>
+                  <button
+                    className="nur-btn"
+                    style={styles.accentBtnSm}
+                    onClick={() => {
+                      setActiveTab("support");
+                      refreshSupportTickets();
+                      refreshSupportArchive();
+                    }}
+                  >
+                    <LifeBuoy size={13} /> Открыть страницу поддержки
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === "support" && (
+          <div style={styles.stack}>
+            <div style={styles.sectionHead}>
+              <LifeBuoy size={16} color="#D9414C" />
+              <span style={styles.sectionTitle}>ПОДДЕРЖКА</span>
+            </div>
+
+            {!session && <div style={styles.emptyState}>Войдите в профиль, чтобы получить доступ.</div>}
+            {session && !profile?.is_admin && !profile?.is_moderator && (
+              <div style={styles.emptyState}>У вашего аккаунта нет прав администратора или модератора.</div>
+            )}
+
+            {session && (profile?.is_admin || profile?.is_moderator) && (
+              <div style={styles.supportPageGrid}>
+                <div style={styles.supportPageSidebar}>
+                  <div style={styles.supportPageTabs}>
+                    <button
+                      style={{ ...styles.supportPageTabBtn, ...(supportPageTab === "active" ? styles.supportPageTabBtnActive : {}) }}
+                      onClick={() => {
+                        setSupportPageTab("active");
+                        refreshSupportTickets();
+                      }}
+                    >
+                      Активные{supportTickets.length ? ` (${supportTickets.length})` : ""}
+                    </button>
+                    <button
+                      style={{ ...styles.supportPageTabBtn, ...(supportPageTab === "archive" ? styles.supportPageTabBtnActive : {}) }}
+                      onClick={() => {
+                        setSupportPageTab("archive");
+                        refreshSupportArchive();
+                      }}
+                    >
+                      Архив
+                    </button>
+                  </div>
+                  <div className="nur-chat-scroll" style={styles.supportPageList}>
+                    {supportPageTab === "active" ? (
+                      <>
+                        {supportTickets.length === 0 && <div style={{ ...styles.hint, padding: 14 }}>Пока никто не писал.</div>}
+                        {supportTickets.map((t) => (
+                          <div
+                            key={t.ticket_id}
+                            style={{ ...styles.supportPageRow, ...(supportTicketId === t.ticket_id ? styles.supportPageRowActive : {}) }}
+                            onClick={() => openSupportChat(t)}
+                          >
+                            <div style={{ position: "relative" }}>
+                              <div style={styles.avatarWrapSm}>
+                                {t.avatar_url ? (
+                                  <img src={t.avatar_url} alt="" style={styles.avatarImgSm} />
+                                ) : (
+                                  <div style={styles.avatarFallbackSm}>{(t.username || "?")[0].toUpperCase()}</div>
+                                )}
+                              </div>
+                              <span
+                                style={{
+                                  position: "absolute",
+                                  bottom: -1,
+                                  right: -1,
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: "50%",
+                                  border: "2px solid #1C1416",
+                                  background: onlineUserIds.has(t.user_id) ? "#6FBF73" : "#5A2E33",
+                                }}
+                              />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13.5, color: "#F3ECEA" }}>{t.username}</div>
+                              <div style={{ ...styles.hint, fontSize: 10.5 }}>{formatDateTime(t.last_at)}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        {supportArchive.length === 0 && <div style={{ ...styles.hint, padding: 14 }}>Архив пуст.</div>}
+                        {supportArchive.map((t) => (
+                          <div
+                            key={t.ticket_id}
+                            style={{ ...styles.supportPageRow, ...(supportTicketId === t.ticket_id ? styles.supportPageRowActive : {}) }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => openArchiveChat(t)}>
+                              <div style={styles.avatarWrapSm}>
+                                {t.avatar_url ? (
+                                  <img src={t.avatar_url} alt="" style={styles.avatarImgSm} />
+                                ) : (
+                                  <div style={styles.avatarFallbackSm}>{(t.username || "?")[0].toUpperCase()}</div>
+                                )}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 13.5, color: "#F3ECEA" }}>{t.username}</div>
+                                <div style={{ ...styles.hint, fontSize: 10.5 }}>закрыт {formatDateTime(t.closed_at)}</div>
+                              </div>
+                            </div>
+                            {profile?.is_admin && (
+                              confirmDeleteTicketId === t.ticket_id ? (
+                                <div style={{ display: "flex", gap: 4 }}>
+                                  <button
+                                    style={styles.iconBtn}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteArchivedTicket(t.ticket_id);
+                                    }}
+                                    title="Подтвердить удаление"
+                                  >
+                                    <Check size={12} color="#FF5A5A" />
+                                  </button>
+                                  <button
+                                    style={styles.iconBtn}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmDeleteTicketId(null);
+                                    }}
+                                    title="Отмена"
+                                  >
+                                    <X size={12} color="#AE9B99" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  style={styles.iconBtn}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConfirmDeleteTicketId(t.ticket_id);
+                                  }}
+                                  title="Удалить из архива"
+                                >
+                                  <Trash2 size={12} color="#FF5A5A" />
+                                </button>
+                              )
+                            )}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div style={styles.supportPageConv}>
+                  {!supportTarget ? (
+                    <div style={{ ...styles.hint, margin: "auto" }}>Выберите обращение слева.</div>
+                  ) : (
+                    <>
+                      <div style={styles.supportPageConvHeader}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={styles.avatarWrapSm}>
+                            <div style={styles.avatarFallbackSm}>{(supportTarget.username || "?")[0].toUpperCase()}</div>
+                          </div>
+                          <span style={{ color: "#F3ECEA", fontSize: 14, fontWeight: 600 }}>{supportTarget.username}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="nur-btn" style={styles.ghostBtnSm} onClick={() => openUserProfile(supportTarget)}>
+                            Профиль
+                          </button>
+                          {supportTicketStatus === "open" &&
+                            (confirmCloseTicket ? (
+                              <>
+                                <button style={{ ...styles.ghostBtnSm, borderColor: "#FF5A5A", color: "#FF5A5A" }} onClick={closeSupportTicket}>
+                                  Подтвердить
+                                </button>
+                                <button style={styles.ghostBtnSm} onClick={() => setConfirmCloseTicket(false)}>
+                                  Отмена
+                                </button>
+                              </>
+                            ) : (
+                              <button style={{ ...styles.ghostBtnSm, borderColor: "#FF5A5A", color: "#FF5A5A" }} onClick={() => setConfirmCloseTicket(true)}>
+                                Закрыть тикет
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                      <div ref={supportMessagesRef} className="nur-chat-scroll" style={styles.supportPageMessages}>
+                        {supportMessages.map((m) => {
+                          const mine = m.sender_id === session?.user.id;
+                          return (
+                            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                              <div style={{ ...styles.chatBubble, ...(mine ? styles.chatBubbleMine : styles.chatBubbleTheirs) }}>{m.content}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {supportTicketStatus === "open" ? (
+                        <div style={styles.chatInputRow}>
+                          <input
+                            className="nur-in"
+                            placeholder="Сообщение…"
+                            value={supportInput}
+                            onChange={(e) => setSupportInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              playTypeSound(e);
+                              if (e.key === "Enter") sendSupportMessage();
+                            }}
+                            style={{ ...styles.input, flex: 1 }}
+                          />
+                          <button className="nur-btn" style={styles.accentBtnSm} onClick={sendSupportMessage}>
+                            Отпр.
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ ...styles.hint, textAlign: "center", padding: "12px 14px", borderTop: "1px solid #3D2226" }}>
+                          Тикет закрыт — переписка доступна только для просмотра
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        </>
+        )}
+
+        {viewingUser &&
+          (() => {
+            const userTeams = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === viewingUser.username));
+            const userTournaments = getUserTournamentHistory(viewingUser.username);
+            const userMatches = getUserMatchHistory(viewingUser.username);
+            const titleCount = userTournaments.filter((t) => t.isChampion).length;
+            const isOwnProfile = session && viewingUser.id === session.user.id;
+            const canSeeFull = isOwnProfile || profile?.is_admin || !viewingUser.is_closed;
+            return (
+              <div>
+                <button style={{ ...styles.ghostBtnSm, marginBottom: 14 }} onClick={() => setViewingUser(null)}>
+                  ← Назад к турнирам
+                </button>
+
+                {!canSeeFull ? (
+                  <div style={{ background: "#170D0E", border: "1px solid #3D2226", borderRadius: 12, padding: "50px 20px", textAlign: "center" }}>
+                    <ShieldAlert size={28} color="#8C7876" />
+                    <div style={{ color: "#F3ECEA", fontSize: 17, fontWeight: 700, marginTop: 12, fontFamily: "'Anton', sans-serif", letterSpacing: 1 }}>
+                      АНКЕТА ЗАКРЫТА
+                    </div>
+                    <div style={{ ...styles.hint, marginTop: 8 }}>Пользователь {viewingUser.username} скрыл свой профиль.</div>
+                  </div>
+                ) : (
+                <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div style={{ flex: "0 0 240px", minWidth: 220, background: "#170D0E", border: "1px solid #3D2226", borderRadius: 12, overflow: "hidden" }}>
+                    <div style={{ padding: "14px 16px", borderBottom: "1px solid #2E1B1E", display: "flex", alignItems: "center", gap: 8 }}>
+                      <Users size={15} color="#E8A33D" />
+                      <span style={{ color: "#E8A33D", fontWeight: 700, fontSize: 13 }}>ДРУЗЬЯ ({viewingUserFriends.length})</span>
+                    </div>
+                    <div style={{ padding: 10 }}>
+                      {viewingUserFriendsLoading ? (
+                        <span style={styles.hint}>Загрузка…</span>
+                      ) : viewingUserFriends.length === 0 ? (
+                        <span style={styles.hint}>Пока никого не добавили.</span>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 560, overflowY: "auto" }}>
+                          {viewingUserFriends.map((fr) => (
+                            <div key={fr.id} style={{ ...styles.friendRow, cursor: "pointer" }} onClick={() => openUserProfile(fr)}>
+                              <div style={{ position: "relative" }}>
+                                <div style={styles.avatarWrapSm}>
+                                  {fr.avatar_url ? (
+                                    <img src={fr.avatar_url} alt="" style={styles.avatarImgSm} />
+                                  ) : (
+                                    <div style={styles.avatarFallbackSm}>{(fr.username || "?")[0].toUpperCase()}</div>
+                                  )}
+                                </div>
+                                <span
+                                  style={{
+                                    position: "absolute",
+                                    bottom: -1,
+                                    right: -1,
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: "50%",
+                                    border: "2px solid #170D0E",
+                                    background: onlineUserIds.has(fr.id) ? "#6FBF73" : "#5A2E33",
+                                  }}
+                                />
+                              </div>
+                              <span style={{ flex: 1, fontSize: 13.5, userSelect: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {fr.username}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ flex: "1 1 420px", minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+                    <div style={{ background: "#170D0E", border: "1px solid #3D2226", borderRadius: 12, overflow: "hidden" }}>
+                      <div style={styles.profileBannerBase}>
+                        {viewingUser.banner_url && <img src={viewingUser.banner_url} alt="" style={styles.profileBannerImg} />}
+                      </div>
+                      <div style={{ padding: "0 24px 20px" }}>
+                        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                          <div
+                            style={{
+                              ...styles.avatarWrap,
+                              width: 100,
+                              height: 100,
+                              marginTop: -30,
+                              border: "4px solid #170D0E",
+                              borderRadius: "50%",
+                              background: "#170D0E",
+                              position: "relative",
+                              zIndex: 2,
+                            }}
+                          >
+                            {viewingUser.avatar_url ? (
+                              <img src={viewingUser.avatar_url} alt="" style={{ ...styles.avatarImg, width: 92, height: 92 }} />
+                            ) : (
+                              <div style={{ ...styles.avatarFallback, width: 92, height: 92, fontSize: 36 }}>{(viewingUser.username || "?")[0].toUpperCase()}</div>
+                            )}
+                          </div>
+
+                          {profile?.is_admin && viewingUser.id !== session?.user.id && (
+                            <button
+                              className="nur-btn"
+                              style={{ ...styles.ghostBtnSm, borderColor: viewingUser.is_moderator ? "#E8A33D" : "#3D2226", color: viewingUser.is_moderator ? "#E8A33D" : "#AE9B99" }}
+                              onClick={() => toggleModerator(viewingUser)}
+                            >
+                              <ShieldPlus size={13} /> {viewingUser.is_moderator ? "Снять статус модератора" : "Выдать статус модератора"}
+                            </button>
+                          )}
+                          {profile?.is_admin && viewingUser.id !== session?.user.id && (
+                            <button
+                              className="nur-btn"
+                              style={{ ...styles.ghostBtnSm, borderColor: viewingUser.is_closed ? "#FF5A5A" : "#3D2226", color: viewingUser.is_closed ? "#FF5A5A" : "#AE9B99" }}
+                              onClick={() => toggleClosedProfile(viewingUser)}
+                            >
+                              <ShieldAlert size={13} /> {viewingUser.is_closed ? "Открыть анкету" : "Закрыть анкету"}
+                            </button>
+                          )}
+                          {session && viewingUser.id !== session.user.id && (
+                            <div style={{ paddingBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                              {friends.some((f) => f.id === viewingUser.id) && (
+                                <button className="nur-btn" style={styles.ghostBtnSm} onClick={() => openChat(viewingUser)}>
+                                  <MessageCircle size={13} /> Написать
+                                </button>
+                              )}
+                              {friends.some((f) => f.id === viewingUser.id) ? (
+                                <span style={{ ...styles.hint, fontSize: 12.5 }}>Уже в друзьях</span>
+                              ) : sentPendingRequests.some((r) => r.id === viewingUser.id) ? (
+                                <span style={{ ...styles.hint, fontSize: 12.5 }}>Заявка отправлена</span>
+                              ) : incomingRequests.some((r) => r.id === viewingUser.id) ? (
+                                <span style={{ ...styles.hint, fontSize: 12.5 }}>Отправил вам заявку — примите её в уведомлениях</span>
+                              ) : (
+                                <button className="nur-btn" style={styles.accentBtnSm} onClick={() => sendFriendRequest(viewingUser.id)}>
+                                  <UserPlus size={13} /> Добавить в друзья
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+                          <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 28, color: "#F3ECEA", letterSpacing: 1 }}>
+                            {viewingUser.username}
+                          </div>
+                          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
+                            <span
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                background: onlineUserIds.has(viewingUser.id) ? "#6FBF73" : "#5A2E33",
+                              }}
+                            />
+                            <span style={{ color: onlineUserIds.has(viewingUser.id) ? "#6FBF73" : "#8C7876" }}>
+                              {onlineUserIds.has(viewingUser.id) ? "в сети" : "не в сети"}
+                            </span>
+                          </span>
+                          {viewingUser.is_moderator && (
+                            <span style={{ fontSize: 11, background: "#3A2A0E", color: "#E8A33D", padding: "3px 9px", borderRadius: 5, fontWeight: 600 }}>
+                              МОДЕРАТОР
+                            </span>
+                          )}
+                        </div>
+                        {userTeams.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                            {userTeams.map((t) => (
+                              <span key={t.id} style={styles.memberChip}>
+                                {teamLabel(t)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ background: "#170D0E", border: "1px solid #3D2226", borderRadius: 12, padding: "16px 20px" }}>
+                      <div style={{ ...styles.cardTitle, fontSize: 13.5, marginBottom: 8 }}>ОПИСАНИЕ</div>
+                      <div style={{ fontSize: 13.5, color: viewingUser.bio ? "#E8DCDB" : "#8C7876", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                        {viewingUser.bio || "Пользователь ничего не написал о себе."}
+                      </div>
+                    </div>
+
+                    <div style={{ background: "#170D0E", border: "1px solid #3D2226", borderRadius: 12, padding: "16px 20px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                        <div style={{ ...styles.cardTitle, fontSize: 13.5 }}>ИСТОРИЯ МАТЧЕЙ ({userMatches.length})</div>
+                        {titleCount > 0 && <span style={{ color: "#E8A33D", fontSize: 12.5, fontWeight: 600 }}>🏆 Титулов: {titleCount}</span>}
+                      </div>
+                      {userMatches.length === 0 ? (
+                        <span style={styles.hint}>Пока не сыграл ни одного матча.</span>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto" }}>
+                          {userMatches.map((m) => (
+                            <div key={m.id} style={{ ...styles.friendRow, justifyContent: "space-between" }}>
+                              <span style={{ fontSize: 13 }}>
+                                {m.tourName} <span style={{ color: "#8C7876", fontSize: 11.5 }}>vs {m.oppName}</span>
+                              </span>
+                              {m.decided ? (
+                                <span style={{ fontSize: 12, fontWeight: 700, color: m.won ? "#6FBF73" : "#FF5A5A" }}>{m.won ? "Победа" : "Поражение"}</span>
+                              ) : (
+                                <span style={{ fontSize: 12, color: "#8C7876" }}>Идёт</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                )}
+              </div>
+            );
+          })()}
+      </div>
+
+      {activeTab === "tournaments" &&
+        expandedTour &&
+        expandedRounds &&
+        (() => {
+          const modalTour = tournaments.find((t) => t.id === expandedTour);
+          if (!modalTour) return null;
+          return (
+            <div style={styles.modalBackdrop} onClick={() => setExpandedTour(null)}>
+              <div style={styles.modalPanel} onClick={(e) => e.stopPropagation()}>
+                <div className="nur-menu-smoke" />
+                <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", height: "100%" }}>
+                  <div style={styles.modalHeader}>
+                    <div>
+                      <div style={{ color: "#F3ECEA", fontWeight: 700, fontSize: 16 }}>{modalTour.name}</div>
+                      <div style={{ color: "#AE9B99", fontSize: 11.5 }}>Турнирная сетка · {MODE_LABEL[modalTour.mode]}</div>
+                    </div>
+                    <button style={styles.iconBtn} onClick={() => setExpandedTour(null)}>
+                      <X size={16} color="#AE9B99" />
+                    </button>
+                  </div>
+                  <div style={styles.modalBody}>{renderBracket(modalTour.id, expandedRounds, !!profile?.is_admin)}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+      {activeChatFriend && (
+        <div style={{ ...styles.chatPanel, transform: `translate(${chatDrag.x}px, ${chatDrag.y}px)` }}>
+          <div style={{ ...styles.chatHeader, cursor: "grab", userSelect: "none" }} onMouseDown={onChatHeaderMouseDown}>
+            <div style={styles.avatarWrapSm}>
+              {activeChatFriend.avatar_url ? (
+                <img src={activeChatFriend.avatar_url} alt="" style={styles.avatarImgSm} />
+              ) : (
+                <div style={styles.avatarFallbackSm}>{(activeChatFriend.username || "?")[0].toUpperCase()}</div>
+              )}
+            </div>
+            <span style={{ flex: 1, color: "#F3ECEA", fontSize: 13.5, fontWeight: 600 }}>{activeChatFriend.username}</span>
+            <button style={styles.iconBtn} onMouseDown={(e) => e.stopPropagation()} onClick={() => setActiveChatFriend(null)}>
+              <X size={14} color="#AE9B99" />
+            </button>
+          </div>
+          <div ref={chatMessagesRef} className="nur-chat-scroll" style={styles.chatMessages}>
+            {chatMessages.length === 0 && <div style={{ ...styles.hint, textAlign: "center", marginTop: 20 }}>Начните переписку</div>}
+            {chatMessages.map((m) => {
+              const mine = m.sender_id === session?.user.id;
+              return (
+                <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                  <div style={{ ...styles.chatBubble, ...(mine ? styles.chatBubbleMine : styles.chatBubbleTheirs) }}>{m.content}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={styles.chatInputRow}>
+            <input
+              className="nur-in"
+              placeholder="Сообщение…"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                playTypeSound(e);
+                if (e.key === "Enter") sendChatMessage();
+              }}
+              style={{ ...styles.input, flex: 1 }}
+            />
+            <button className="nur-btn" style={styles.accentBtnSm} onClick={sendChatMessage}>
+              Отпр.
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(() => {
+        if (!currentUsername) return null;
+        const myTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === currentUsername)).map((t) => t.id);
+        const myReadyCheck = readyChecks.find((rc) => {
+          if (rc.status !== "pending") return false;
+          const isTeam1 = myTeamIds.includes(rc.team1_id);
+          const isTeam2 = myTeamIds.includes(rc.team2_id);
+          if (!isTeam1 && !isTeam2) return false;
+          const alreadyAccepted = isTeam1 ? !!rc.team1_accepted_at : !!rc.team2_accepted_at;
+          return !alreadyAccepted;
+        });
+        if (!myReadyCheck) return null;
+        const isTeam1 = myTeamIds.includes(myReadyCheck.team1_id);
+        const myTeam = teamMap[isTeam1 ? myReadyCheck.team1_id : myReadyCheck.team2_id];
+        const oppTeam = teamMap[isTeam1 ? myReadyCheck.team2_id : myReadyCheck.team1_id];
+        const tour = tournaments.find((t) => t.id === myReadyCheck.tournament_id);
+        const secondsLeft = Math.max(0, Math.floor((new Date(myReadyCheck.deadline).getTime() - readyCheckNow) / 1000));
+        const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
+        const ss = String(secondsLeft % 60).padStart(2, "0");
+        return (
+          <div style={styles.readyCheckOverlay}>
+            <div style={{ ...styles.readyCheckCard, position: "relative" }}>
+              {profile?.is_admin && (
+                <button
+                  style={{ position: "absolute", top: 10, right: 10, ...styles.iconBtn }}
+                  title="Отменить (админ)"
+                  onClick={() => cancelReadyCheck(myReadyCheck)}
+                >
+                  <X size={13} color="#AE9B99" />
+                </button>
+              )}
+              <div style={{ ...styles.hint, marginBottom: 6 }}>{tour ? tour.name : "Турнир"}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#F3ECEA", marginBottom: 4, textAlign: "center" }}>
+                {myTeam ? teamLabel(myTeam) : "Ваша команда"} vs {oppTeam ? teamLabel(oppTeam) : "Соперник"}
+              </div>
+              <div style={{ ...styles.hint, marginBottom: 16, textAlign: "center" }}>Матч готов начаться — подтвердите участие</div>
+              <div style={styles.readyCheckTimer}>
+                {mm}:{ss}
+              </div>
+              <button className="nur-btn" style={{ ...styles.accentBtn, marginTop: 18, width: "100%", justifyContent: "center" }} onClick={() => acceptReadyCheck(myReadyCheck)}>
+                Принять
+              </button>
+              <div style={{ ...styles.hint, marginTop: 10, fontSize: 11, textAlign: "center" }}>
+                Если не подтвердить за отведённое время — команде будет засчитано техническое поражение.
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {(() => {
+        if (!currentUsername) return null;
+        const myTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === currentUsername)).map((t) => t.id);
+        const myVeto = matchVetoes.find((v) => myTeamIds.includes(v.team1_id) || myTeamIds.includes(v.team2_id));
+        if (!myVeto) return null;
+        const myTeam = teams.find((t) => myTeamIds.includes(t.id) && (t.id === myVeto.team1_id || t.id === myVeto.team2_id));
+        const isCaptain = myTeam && myTeam.owner_id === session?.user.id;
+        const myTurn = isCaptain && myVeto.current_turn_team_id === myTeam.id;
+        const oppTeamId = myTeam?.id === myVeto.team1_id ? myVeto.team2_id : myVeto.team1_id;
+        const oppTeam = teamMap[oppTeamId];
+        const turnTeam = teamMap[myVeto.current_turn_team_id];
+        return (
+          <div style={styles.readyCheckOverlay}>
+            <VetoBackground />
+            <div style={{ ...styles.readyCheckCard, maxWidth: "none", width: "100%", background: "transparent", border: "none", boxShadow: "none", padding: 0, position: "relative" }}>
+              {profile?.is_admin && (
+                <button
+                  style={{ position: "absolute", top: -6, right: -6, zIndex: 2, ...styles.iconBtn }}
+                  title="Отменить (админ)"
+                  onClick={() => cancelVeto(myVeto)}
+                >
+                  <X size={13} color="#AE9B99" />
+                </button>
+              )}
+              <div
+                style={{
+                  fontFamily: "'Anton', sans-serif",
+                  fontSize: 30,
+                  letterSpacing: 1.5,
+                  textTransform: "uppercase",
+                  color: "#F3ECEA",
+                  marginBottom: 2,
+                  textAlign: "center",
+                  position: "relative",
+                  zIndex: 1,
+                }}
+              >
+                {myTeam ? teamLabel(myTeam) : "Вы"} <span style={{ color: "#D9414C", margin: "0 12px" }}>VS</span> {oppTeam ? teamLabel(oppTeam) : "Соперник"}
+              </div>
+              {myVeto.status === "completed" ? (
+                <div style={{ ...styles.vetoTurnLabel, marginBottom: 40 }}>Карта определена</div>
+              ) : (
+                <div style={{ ...styles.vetoTurnLabel, marginBottom: 40 }}>
+                  {!isCaptain
+                    ? `Банит капитан · сейчас ход: ${turnTeam ? teamLabel(turnTeam) : "…"}`
+                    : myTurn
+                    ? "Ваш ход — забаньте карту"
+                    : `Сейчас банит: ${turnTeam ? teamLabel(turnTeam) : "…"}`}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "flex-end", padding: "10px 4px 16px", position: "relative", zIndex: 1, width: "100%", maxWidth: 1360, margin: "0 auto" }}>
+                {MAP_POOL.map((mapKey) => {
+                  const banned = !myVeto.maps_remaining.includes(mapKey);
+                  const isDecider = myVeto.status === "completed" && myVeto.final_map === mapKey;
+                  const clickable = myTurn && !banned && myVeto.status !== "completed";
+                  const banEntry = myVeto.banned_maps.find((b) => b.map === mapKey);
+                  const banTeam = banEntry ? teamMap[banEntry.team_id] : null;
+                  const isGoldBadge = banTeam && banTeam.id === myVeto.team1_id;
+                  const isBanning = banningMapKey === mapKey;
+                  return (
+                    <div
+                      key={mapKey}
+                      className={[
+                        "nur-veto-card",
+                        clickable && !isBanning ? "pickable" : "",
+                        isBanning ? "banning" : "",
+                      ].filter(Boolean).join(" ")}
+                      onClick={() => {
+                        if (!clickable || banningMapKey) return;
+                        setBanningMapKey(mapKey);
+                        setTimeout(() => {
+                          banMap(myVeto, mapKey);
+                          setBanningMapKey(null);
+                        }, 480);
+                      }}
+                      style={{
+                        ...styles.vetoCard,
+                        cursor: clickable && !isBanning ? "pointer" : "default",
+                        filter: banned ? "grayscale(0.9) brightness(0.3)" : "none",
+                        borderColor: isDecider ? "#E8A33D" : clickable ? "#4A2C2F" : "#3D2226",
+                        boxShadow: isDecider ? "0 0 44px rgba(232,163,61,0.55), 0 22px 50px rgba(0,0,0,0.7)" : "none",
+                        transform: isDecider ? "skewX(-7deg) translateY(-16px) scale(1.04)" : "skewX(-7deg)",
+                      }}
+                    >
+                      {/* фон-слой: намеренно НЕ компенсирует наклон, иначе по углам
+                          рамки остаются пустые треугольники */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: "-6% -14%",
+                          background: mapImages[mapKey] ? `url(${mapImages[mapKey]}) center/cover` : MAP_GRADIENT[mapKey],
+                        }}
+                      />
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background: "linear-gradient(180deg, rgba(0,0,0,0) 38%, rgba(0,0,0,0.93) 100%)",
+                        }}
+                      />
+                      {isBanning && (
+                        <>
+                          <div className="nur-veto-flash" />
+                          <div className="nur-veto-sweep" />
+                        </>
+                      )}
+                      {banTeam && !isBanning && (
+                        <div
+                          className="nur-veto-badge-anim"
+                          style={{
+                            ...styles.vetoTeamBadge,
+                            borderColor: isGoldBadge ? "#E8A33D" : "#D9414C",
+                            boxShadow: isGoldBadge ? "0 0 26px rgba(232,163,61,0.5)" : "0 0 26px rgba(217,65,76,0.5)",
+                          }}
+                        >
+                          {(banTeam.tag || teamLabel(banTeam)).slice(0, 4).toUpperCase()}
+                        </div>
+                      )}
+                      {/* текст компенсирует наклон карточки, чтобы стоять ровно */}
+                      <div style={{ position: "relative", padding: "14px 10px 20px", textAlign: "center", transform: "skewX(7deg)" }}>
+                        <div
+                          style={{
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 700,
+                            fontSize: 12,
+                            letterSpacing: 3.5,
+                            textTransform: "uppercase",
+                            color: banned ? "#6b5a58" : isDecider ? "#fff" : "#E8A33D",
+                          }}
+                        >
+                          {isDecider ? "Играем" : banned ? "Бан" : "Забанить"}
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: "'Anton', sans-serif",
+                            fontSize: 24,
+                            letterSpacing: 1,
+                            textTransform: "uppercase",
+                            marginTop: 4,
+                            color: banned ? "#6b5a58" : "#fff",
+                            textDecoration: banned ? "line-through" : "none",
+                            textShadow: "0 2px 14px rgba(0,0,0,0.7)",
+                          }}
+                        >
+                          {MAP_LABEL[mapKey]}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {(() => {
+        if (!currentUsername) return null;
+        const myTeamIds = teams.filter((t) => (t.team_members || []).some((m) => m.member_name === currentUsername)).map((t) => t.id);
+        const myCoinflip = matchCoinflips.find((cf) => myTeamIds.includes(cf.team1_id) || myTeamIds.includes(cf.team2_id));
+        if (!myCoinflip) return null;
+        const myTeam = teams.find((t) => myTeamIds.includes(t.id) && (t.id === myCoinflip.team1_id || t.id === myCoinflip.team2_id));
+        const oppTeamId = myTeam?.id === myCoinflip.team1_id ? myCoinflip.team2_id : myCoinflip.team1_id;
+        const oppTeam = teamMap[oppTeamId];
+        const spinnerTeam = teamMap[myCoinflip.spinner_team_id];
+        const iAmSpinner = myTeam && myTeam.id === myCoinflip.spinner_team_id;
+        const canSpin = iAmSpinner && myTeam.owner_id === session?.user.id;
+        const ctTeam = myCoinflip.ct_team_id ? teamMap[myCoinflip.ct_team_id] : null;
+        const tTeam = myCoinflip.ct_team_id ? teamMap[myCoinflip.ct_team_id === myCoinflip.team1_id ? myCoinflip.team2_id : myCoinflip.team1_id] : null;
+        return (
+          <div style={styles.readyCheckOverlay}>
+            <div style={{ ...styles.readyCheckCard, position: "relative" }}>
+              {profile?.is_admin && (
+                <button
+                  style={{ position: "absolute", top: 10, right: 10, ...styles.iconBtn }}
+                  title="Отменить (админ)"
+                  onClick={() => cancelCoinflip(myCoinflip)}
+                >
+                  <X size={13} color="#AE9B99" />
+                </button>
+              )}
+              <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 22, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6, textAlign: "center" }}>
+                {myTeam ? teamLabel(myTeam) : "Вы"} <span style={{ color: "#D9414C" }}>VS</span> {oppTeam ? teamLabel(oppTeam) : "Соперник"}
+              </div>
+              <div style={{ ...styles.vetoTurnLabel, marginBottom: 30 }}>
+                {myCoinflip.status === "completed"
+                  ? "Стороны определены"
+                  : iAmSpinner
+                  ? canSpin
+                    ? "Ваш ход — крутите барабан"
+                    : "Крутит капитан вашей команды"
+                  : `Барабан крутит: ${spinnerTeam ? teamLabel(spinnerTeam) : "…"}`}
+              </div>
+
+              <CoinflipMachine coinflip={myCoinflip} canSpin={canSpin} onSpin={() => spinCoinflip(myCoinflip)} />
+
+              {myCoinflip.status === "completed" && ctTeam && tTeam && (
+                <div style={{ display: "flex", gap: 18, marginTop: 30 }}>
+                  <div style={{ width: 210, padding: "16px 14px", textAlign: "center", borderRadius: 8, border: "1px solid #3D2226", background: "linear-gradient(160deg,#182636,#0c141f)" }}>
+                    <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, marginBottom: 6 }}>{teamLabel(ctTeam)}</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 12, letterSpacing: 2, color: "#8fb6e8" }}>CT</div>
+                  </div>
+                  <div style={{ width: 210, padding: "16px 14px", textAlign: "center", borderRadius: 8, border: "1px solid #3D2226", background: "linear-gradient(160deg,#33200f,#1a1008)" }}>
+                    <div style={{ fontFamily: "'Anton', sans-serif", fontSize: 15, marginBottom: 6 }}>{teamLabel(tTeam)}</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, fontSize: 12, letterSpacing: 2, color: "#e8b06a" }}>T</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {toasts.length > 0 && (
+        <div style={styles.toastStack}>
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              style={{ ...styles.toast, cursor: t.sender ? "pointer" : "default" }}
+              onClick={() => {
+                if (t.sender) {
+                  openChat(t.sender);
+                  setToasts((prev) => prev.filter((x) => x.id !== t.id));
+                }
+              }}
+            >
+              <MessageCircle size={16} color="#E8A33D" />
+              <span style={{ fontWeight: 600 }}>{t.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {session && !supportPanelOpen && (
+        <button
+          style={styles.supportFab}
+          onClick={() => {
+            if (profile?.is_admin || profile?.is_moderator) {
+              setActiveTab("support");
+              setViewingUser(null);
+              refreshSupportTickets();
+              refreshSupportArchive();
+            } else {
+              openSupportChat(null);
+            }
+          }}
+        >
+          <LifeBuoy size={20} color="#fff" />
+          {supportUnread > 0 && <span style={styles.notifyDot} />}
+        </button>
+      )}
+
+      {supportPanelOpen && (
+        <div style={{ ...styles.supportPanel, transform: `translate(${supportDrag.x}px, ${supportDrag.y}px)` }}>
+          <div style={{ ...styles.chatHeader, cursor: "grab", userSelect: "none" }} onMouseDown={onSupportHeaderMouseDown}>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
+              <div>
+                <div style={{ color: "#F3ECEA", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Поддержка NUR</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {staffProfiles.filter((s) => onlineUserIds.has(s.id)).length === 0 && (
+                    <span style={{ ...styles.hint, fontSize: 11 }}>Сейчас никого нет в сети</span>
+                  )}
+                  {staffProfiles
+                    .filter((s) => onlineUserIds.has(s.id))
+                    .slice(0, 6)
+                    .map((s) => (
+                      <div key={s.id} style={{ ...styles.avatarWrapSm, width: 22, height: 22 }} title={s.username}>
+                        {s.avatar_url ? (
+                          <img src={s.avatar_url} alt="" style={{ ...styles.avatarImgSm, width: 22, height: 22 }} />
+                        ) : (
+                          <div style={{ ...styles.avatarFallbackSm, width: 22, height: 22, fontSize: 10 }}>{(s.username || "?")[0].toUpperCase()}</div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+            {supportTicketStatus === "open" && (
+              confirmCloseTicket ? (
+                <>
+                  <span style={{ fontSize: 11, color: "#AE9B99", whiteSpace: "nowrap" }}>Закрыть тикет?</span>
+                  <button
+                    style={{ ...styles.iconBtn, borderColor: "#FF5A5A" }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={closeSupportTicket}
+                    title="Подтвердить закрытие"
+                  >
+                    <Check size={13} color="#FF5A5A" />
+                  </button>
+                  <button style={styles.iconBtn} onMouseDown={(e) => e.stopPropagation()} onClick={() => setConfirmCloseTicket(false)} title="Отмена">
+                    <X size={13} color="#AE9B99" />
+                  </button>
+                </>
+              ) : (
+                <button
+                  style={styles.iconBtn}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={() => setConfirmCloseTicket(true)}
+                  title="Закрыть тикет"
+                >
+                  <ShieldAlert size={13} color="#AE9B99" />
+                </button>
+              )
+            )}
+            <button style={styles.iconBtn} onMouseDown={(e) => e.stopPropagation()} onClick={() => setSupportPanelOpen(false)}>
+              <X size={14} color="#AE9B99" />
+            </button>
+          </div>
+
+          <div ref={supportMessagesRef} className="nur-chat-scroll" style={styles.chatMessages}>
+            {supportMessages.length === 0 && <div style={{ ...styles.hint, textAlign: "center", marginTop: 20 }}>Напишите нам, если есть вопрос</div>}
+            {supportMessages.map((m) => {
+              const mine = m.sender_id === session?.user.id;
+              return (
+                <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                  <div style={{ ...styles.chatBubble, ...(mine ? styles.chatBubbleMine : styles.chatBubbleTheirs) }}>{m.content}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {supportTicketStatus === "open" ? (
+            <div style={styles.chatInputRow}>
+              <input
+                className="nur-in"
+                placeholder="Сообщение…"
+                value={supportInput}
+                onChange={(e) => setSupportInput(e.target.value)}
+                onKeyDown={(e) => {
+                  playTypeSound(e);
+                  if (e.key === "Enter") sendSupportMessage();
+                }}
+                style={{ ...styles.input, flex: 1 }}
+              />
+              <button className="nur-btn" style={styles.accentBtnSm} onClick={sendSupportMessage}>
+                Отпр.
+              </button>
+            </div>
+          ) : (
+            <div style={{ ...styles.hint, textAlign: "center", padding: "12px 14px", borderTop: "1px solid #3D2226" }}>
+              Тикет закрыт — напишите новое сообщение, чтобы начать новое обращение
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const styles = {
+  page: { minHeight: "100vh", background: "#0E0B0C", color: "#F3ECEA", fontFamily: "'Inter', sans-serif" },
+  loadingWrap: { minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, background: "#0E0B0C" },
+  nav: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14, padding: "14px 22px", borderBottom: "1px solid #2E1B1E", background: "#150F10" },
+  logoImg: { width: 38, height: 38, borderRadius: 7, objectFit: "cover", boxShadow: "0 0 0 1px #3D2226, 0 0 14px #D9414C55" },
+  logo: {
+    fontFamily: "'Anton', 'Teko', sans-serif",
+    fontWeight: 400,
+    fontSize: 22,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: "#F3ECEA",
+    textShadow: "0 0 18px #D9414C66",
+  },
+  promoBanner: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    maxWidth: 880,
+    margin: "18px auto 0",
+    padding: 10,
+    border: "1px solid #3D2226",
+    background: "linear-gradient(90deg, #1C1416 0%, #241618 100%)",
+    textDecoration: "none",
+    cursor: "pointer",
+  },
+  promoImg: { width: 64, height: 64, objectFit: "cover", flexShrink: 0 },
+  promoText: { display: "flex", flexDirection: "column", gap: 4 },
+  promoTitle: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13.5,
+    fontWeight: 600,
+    color: "#F3ECEA",
+  },
+  promoSub: { fontSize: 12, color: "#AE9B99" },
+  tabsRow: { display: "flex", gap: 4, background: "#1C1416", padding: 4, border: "1px solid #2E1B1E" },
+  tabBtn: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: "#AE9B99", fontSize: 12.5, padding: "7px 12px", cursor: "pointer", fontFamily: "'Inter', sans-serif" },
+  tabBtnActive: { background: "#D9414C", color: "#F3ECEA", fontWeight: 600 },
+  modeToggle: { display: "flex", gap: 4, background: "#1C1416", padding: 4, border: "1px solid #2E1B1E" },
+  modeBtn: { border: "1px solid #3D2226", borderRadius: 10, color: "#AE9B99", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1, padding: "11px 14px", cursor: "pointer", position: "relative", zIndex: 2 },
+  modeBtnActive: { color: "#1C1416", fontWeight: 700, borderColor: "transparent", boxShadow: "0 0 18px rgba(232,163,61,0.5), inset 0 1px 0 rgba(255,255,255,0.35)" },
+  body: { maxWidth: 1240, margin: "0 auto", padding: "26px 20px 60px" },
+  stack: { display: "flex", flexDirection: "column", gap: 14 },
+  sectionHead: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 },
+  sectionTitle: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, letterSpacing: 1.5, color: "#E8DCDB" },
+  card: { border: "1px solid #3D2226", background: "#1C1416", padding: 18 },
+  cardHeadRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 },
+  cardTitle: { fontSize: 15.5, fontWeight: 600 },
+  cardMeta: { fontSize: 12, color: "#AE9B99", marginTop: 3 },
+  badge: { fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, letterSpacing: 0.5, border: "1px solid #4A2C2F", padding: "3px 8px", color: "#E8DCDB", whiteSpace: "nowrap" },
+  championBanner: { marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "8px 12px", border: "1px solid #D9414C55", background: "#D9414C14" },
+  tourBanner: { width: "100%", height: 140, objectFit: "cover", display: "block" },
+  tourBannerSm: { width: 56, height: 56, objectFit: "cover", flexShrink: 0 },
+  prizeRow: { display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12.5, color: "#F3ECEA" },
+  scheduleRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 8,
+    fontSize: 11.5,
+    color: "#AE9B99",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  regRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" },
+  hint: { fontSize: 12, color: "#8C7876" },
+  input: { background: "#0E0B0C", border: "1px solid #4A2C2F", color: "#F3ECEA", padding: "9px 10px", fontSize: 13.5, fontFamily: "'Inter', sans-serif", outline: "none" },
+  select: { background: "#0E0B0C", border: "1px solid #4A2C2F", color: "#F3ECEA", padding: "9px 10px", fontSize: 13, outline: "none" },
+  accentBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "#D9414C", color: "#FFFFFF", border: "none", padding: "10px 14px", fontWeight: 600, fontSize: 13, cursor: "pointer" },
+  accentBtnSm: { display: "flex", alignItems: "center", gap: 6, background: "#D9414C", color: "#FFFFFF", border: "none", padding: "8px 12px", fontWeight: 600, fontSize: 12.5, cursor: "pointer" },
+  ghostBtnSm: { display: "flex", alignItems: "center", gap: 6, background: "transparent", color: "#AE9B99", border: "1px solid #4A2C2F", padding: "8px 12px", fontSize: 12.5, cursor: "pointer" },
+  iconBtn: { background: "transparent", border: "1px solid #4A2C2F", padding: 6, cursor: "pointer", color: "#AE9B99" },
+  segBtn: { flex: 1, background: "#0E0B0C", border: "1px solid #4A2C2F", color: "#AE9B99", padding: "8px 0", fontSize: 12.5, cursor: "pointer" },
+  segBtnActive: { background: "#D9414C", color: "#FFFFFF", borderColor: "#D9414C", fontWeight: 600 },
+  memberChip: { fontSize: 12, background: "#0E0B0C", border: "1px solid #2E1B1E", padding: "4px 9px", color: "#E8DCDB" },
+  suggestBox: {
+    position: "absolute",
+    top: "calc(100% + 2px)",
+    left: 0,
+    right: 0,
+    zIndex: 5,
+    background: "#1C1416",
+    border: "1px solid #4A2C2F",
+    maxHeight: 160,
+    overflowY: "auto",
+  },
+  suggestItem: { padding: "8px 10px", fontSize: 13, color: "#F3ECEA", cursor: "pointer" },
+  avatarWrap: { width: 56, height: 56, flexShrink: 0 },
+  avatarImg: { width: 56, height: 56, borderRadius: "50%", objectFit: "cover", border: "1px solid #3D2226", userSelect: "none", pointerEvents: "none" },
+  avatarFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: "50%",
+    background: "#3D2226",
+    color: "#D9414C",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 22,
+  },
+  avatarPill: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "#1C1416",
+    border: "1px solid #3D2226",
+    borderRadius: 20,
+    padding: "6px 14px 6px 12px",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  bellBtn: {
+    position: "relative",
+    width: 34,
+    height: 34,
+    borderRadius: "50%",
+    background: "#1C1416",
+    border: "1px solid #3D2226",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  avatarWrapPill: { width: 26, height: 26, flexShrink: 0 },
+  avatarImgPill: { width: 26, height: 26, borderRadius: "50%", objectFit: "cover", border: "1px solid #D9414C" },
+  avatarFallbackPill: {
+    width: 26,
+    height: 26,
+    borderRadius: "50%",
+    background: "#3D2226",
+    border: "1px solid #D9414C",
+    color: "#D9414C",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 12,
+  },
+  notifyDot: { position: "absolute", top: -2, right: -3, width: 7, height: 7, borderRadius: "50%", background: "#D9414C" },
+  navDropdown: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    width: 300,
+    background: "rgba(28,20,22,0.92)",
+    border: "1px solid #3D2226",
+    borderRadius: 10,
+    padding: 10,
+    zIndex: 20,
+    overflow: "hidden",
+  },
+  avatarWrapMenu: { width: 44, height: 44, flexShrink: 0 },
+  avatarImgMenu: { width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "2px solid #D9414C" },
+  avatarFallbackMenu: {
+    width: 44,
+    height: 44,
+    borderRadius: "50%",
+    background: "#3D2226",
+    color: "#D9414C",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 17,
+  },
+  navDropdownItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    width: "100%",
+    background: "transparent",
+    border: "none",
+    color: "#F3ECEA",
+    fontSize: 13,
+    padding: "9px 10px",
+    cursor: "pointer",
+    textAlign: "left",
+    fontFamily: "'Inter', sans-serif",
+  },
+  friendRow: { display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", background: "#0E0B0C", border: "1px solid #2E1B1E", userSelect: "none" },
+  avatarWrapSm: { width: 32, height: 32, flexShrink: 0 },
+  avatarImgSm: { width: 32, height: 32, borderRadius: "50%", objectFit: "cover", border: "1px solid #3D2226", userSelect: "none", pointerEvents: "none" },
+  avatarFallbackSm: {
+    width: 32,
+    height: 32,
+    borderRadius: "50%",
+    background: "#3D2226",
+    color: "#D9414C",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 14,
+  },
+  errorNote: { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#FF5A5A", marginBottom: 14, padding: "8px 12px", border: "1px solid #FF5A5A33" },
+  leaderRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", background: "#0E0B0C", border: "1px solid #2E1B1E" },
+  leaderRank: { width: 28, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, display: "flex", alignItems: "center" },
+  leaderName: { flex: 1, fontSize: 13 },
+  leaderStat: { fontSize: 11.5, color: "#AE9B99", fontFamily: "'JetBrains Mono', monospace" },
+  matchCard: { width: "100%", height: "100%", background: "#150F10", border: "1px solid #3D2226" },
+  chatPanel: {
+    position: "fixed",
+    bottom: 20,
+    right: 20,
+    width: 300,
+    height: 400,
+    minWidth: 260,
+    minHeight: 280,
+    maxWidth: "80vw",
+    maxHeight: "85vh",
+    resize: "both",
+    overflow: "hidden",
+    background: "#1C1416",
+    border: "1px solid #3D2226",
+    borderRadius: 10,
+    display: "flex",
+    flexDirection: "column",
+    zIndex: 50,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+  },
+  chatHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "10px 12px",
+    borderBottom: "1px solid #3D2226",
+  },
+  chatMessages: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "10px 12px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  chatBubble: { maxWidth: "75%", padding: "7px 10px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.4, wordBreak: "break-word" },
+  chatBubbleMine: { background: "#D9414C", color: "#fff" },
+  chatBubbleTheirs: { background: "#0E0B0C", color: "#F3ECEA", border: "1px solid #2E1B1E" },
+  chatInputRow: { display: "flex", gap: 8, padding: "10px 12px", borderTop: "1px solid #3D2226" },
+  supportPageGrid: {
+    display: "grid",
+    gridTemplateColumns: "280px 1fr",
+    border: "1px solid #3D2226",
+    background: "#1C1416",
+    minHeight: 520,
+  },
+  supportPageSidebar: { borderRight: "1px solid #3D2226", display: "flex", flexDirection: "column" },
+  supportPageTabs: { display: "flex", borderBottom: "1px solid #3D2226" },
+  supportPageTabBtn: {
+    flex: 1,
+    textAlign: "center",
+    padding: "12px 0",
+    fontSize: 12,
+    letterSpacing: 0.5,
+    color: "#AE9B99",
+    cursor: "pointer",
+    background: "transparent",
+    border: "none",
+    borderBottom: "2px solid transparent",
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  supportPageTabBtnActive: { color: "#E8A33D", borderBottomColor: "#E8A33D", fontWeight: 700 },
+  supportPageList: { overflowY: "auto", flex: 1 },
+  supportPageRow: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #241618", cursor: "pointer" },
+  supportPageRowActive: { background: "rgba(217,65,76,0.12)" },
+  supportPageConv: { display: "flex", flexDirection: "column", minHeight: 520 },
+  supportPageConvHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: "1px solid #3D2226" },
+  supportPageMessages: { flex: 1, padding: 18, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" },
+  supportFab: {
+    position: "fixed",
+    bottom: 20,
+    left: 20,
+    width: 52,
+    height: 52,
+    borderRadius: "50%",
+    background: "#D9414C",
+    border: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    boxShadow: "0 8px 20px rgba(0,0,0,0.4)",
+    zIndex: 50,
+  },
+  readyCheckOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "#000",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 300,
+    padding: 20,
+    overflow: "hidden",
+  },
+  readyCheckCard: {
+    width: "100%",
+    maxWidth: 380,
+    background: "#1C1416",
+    border: "1px solid #D9414C",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(217,65,76,0.25)",
+    padding: "28px 26px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  readyCheckTimer: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 40,
+    fontWeight: 700,
+    color: "#E8A33D",
+    letterSpacing: 2,
+  },
+  vetoTurnLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 13,
+    fontWeight: 700,
+    letterSpacing: 2.5,
+    textTransform: "uppercase",
+    color: "#E8A33D",
+    textAlign: "center",
+    position: "relative",
+    zIndex: 1,
+  },
+  vetoCard: {
+    position: "relative",
+    flex: "1 1 0",
+    minWidth: 0,
+    maxWidth: 150,
+    height: 420,
+    overflow: "hidden",
+    border: "1px solid #3D2226",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "flex-end",
+  },
+  vetoTeamBadge: {
+    position: "absolute",
+    top: "46%",
+    left: "50%",
+    transform: "translate(-50%,-50%) skewX(7deg)",
+    width: 74,
+    height: 74,
+    borderRadius: "50%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 20,
+    letterSpacing: 0.5,
+    color: "#F3ECEA",
+    background: "rgba(14,8,9,0.9)",
+    border: "2px solid",
+  },
+  reelsRow: { display: "flex", gap: 15, justifyContent: "center" },
+  coinflipMachine: {
+    position: "relative",
+    padding: "26px 26px 30px",
+    borderRadius: 20,
+    background: "linear-gradient(180deg, #2a1b1e, #170e10 60%, #120b0d)",
+    border: "1px solid #4A2C2F",
+    boxShadow: "0 30px 70px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.06)",
+  },
+  reelFrame: {
+    width: 134,
+    height: REEL_HEIGHT,
+    borderRadius: 12,
+    overflow: "hidden",
+    position: "relative",
+    background: "linear-gradient(180deg, #0c0607, #180a0d)",
+    border: "1px solid #3D2226",
+    boxShadow: "inset 0 15px 28px rgba(0,0,0,0.88), inset 0 -15px 28px rgba(0,0,0,0.88)",
+  },
+  reelPayline: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: "50%",
+    height: 70,
+    marginTop: -35,
+    zIndex: 2,
+    borderTop: "1px solid rgba(232,163,61,0.32)",
+    borderBottom: "1px solid rgba(232,163,61,0.32)",
+    background: "rgba(232,163,61,0.05)",
+    pointerEvents: "none",
+  },
+  reelStrip: { position: "absolute", left: 0, right: 0, top: 0 },
+  reelCell: {
+    height: REEL_CELL,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'Anton', sans-serif",
+    fontSize: 29,
+    letterSpacing: 2,
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+  },
+  // background/transform/box-shadow/shine are all owned by the .nur-spin-btn
+  // CSS class — an inline style here would silently block them (same bug we
+  // hit earlier with mode-toggle buttons: inline style always beats CSS).
+  spinBtn: { border: "none" },
+  toastStack: {
+    position: "fixed",
+    top: 80,
+    right: 20,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    zIndex: 80,
+  },
+  toast: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "#1C1416",
+    border: "1px solid #D9414C",
+    borderLeft: "4px solid #D9414C",
+    borderRadius: 8,
+    padding: "12px 16px",
+    fontSize: 13,
+    color: "#F3ECEA",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.55), 0 0 16px rgba(217,65,76,0.35)",
+    maxWidth: 280,
+    animation: "nur-toast-in 0.25s ease",
+  },
+  supportPanel: {
+    position: "fixed",
+    bottom: 20,
+    left: 20,
+    width: 300,
+    height: 400,
+    minWidth: 260,
+    minHeight: 280,
+    maxWidth: "80vw",
+    maxHeight: "85vh",
+    resize: "both",
+    overflow: "hidden",
+    background: "#170D0E",
+    border: "1px solid #3D2226",
+    borderRadius: 10,
+    display: "flex",
+    flexDirection: "column",
+    zIndex: 50,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+  },
+  adSlotFilled: { display: "block", minHeight: 160, border: "1px solid #3D2226", borderRadius: 8, overflow: "hidden", background: "#150F10" },
+  adSlotImg: { width: "100%", minHeight: 160, maxHeight: 220, objectFit: "cover", display: "block" },
+  adSlotEmpty: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 160,
+    padding: 16,
+    border: "1px dashed #3D2226",
+    borderRadius: 8,
+    textDecoration: "none",
+  },
+  profileBannerBase: {
+    position: "relative",
+    zIndex: 0,
+    width: "100%",
+    height: 190,
+    background: "linear-gradient(135deg, #2A1216, #150A0B)",
+    overflow: "hidden",
+  },
+  profileBannerImg: { width: "100%", height: "100%", objectFit: "cover", display: "block", userSelect: "none", pointerEvents: "none" },
+  modalBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(5,3,3,0.75)",
+    backdropFilter: "blur(2px)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 60,
+    padding: 20,
+  },
+  modalPanel: {
+    position: "relative",
+    overflow: "hidden",
+    maxWidth: "min(900px, 92vw)",
+    maxHeight: "86vh",
+    width: "100%",
+    background: "rgba(24,16,18,0.97)",
+    border: "1px solid #3D2226",
+    borderRadius: 14,
+    boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+    display: "flex",
+    flexDirection: "column",
+  },
+  modalHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "16px 20px",
+    borderBottom: "1px solid #3D2226",
+  },
+  modalBody: {
+    padding: "10px 20px 24px",
+    overflow: "auto",
+  },
+};
